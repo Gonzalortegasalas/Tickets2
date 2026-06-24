@@ -30,6 +30,7 @@ function init() {
   $('export-csv').addEventListener('click', exportCsv);
   $('export-zip').addEventListener('click', exportZip);
   $('reload-cloud').addEventListener('click', loadFromCloud);
+  $('delete-all-tickets').addEventListener('click', clearAllTickets);
   $('backup-json').addEventListener('click', backupJson);
   $('clear-all').addEventListener('click', clearAllTickets);
 
