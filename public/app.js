@@ -1,5 +1,9 @@
+import { exportWeeklyZip } from './exportZip.js';
+
 const categories = ['Alimentos', 'Supermercado', 'Restaurante', 'Transporte', 'Gasolina', 'Salud', 'Farmacia', 'Tecnologia', 'Electronica', 'Hogar', 'Ferreteria', 'Ropa', 'Otro'];
 const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+const IMAGE_DB_NAME = 'tickets2-images';
+const IMAGE_STORE_NAME = 'ticketImages';
 
 let tickets = loadLocalTickets();
 let ticketImage = null;
@@ -22,6 +26,7 @@ function init() {
   $('manual-btn').addEventListener('click', openManualDialog);
   $('save-manual').addEventListener('click', saveManualTicket);
   $('export-csv').addEventListener('click', exportCsv);
+  $('export-zip').addEventListener('click', exportZip);
   $('reload-cloud').addEventListener('click', loadFromCloud);
   $('backup-json').addEventListener('click', backupJson);
   $('clear-all').addEventListener('click', clearAllTickets);
@@ -140,6 +145,7 @@ async function scanTicket() {
     }
 
     const ticket = buildTicket(data.ticket);
+    await storeTicketImages(ticket.id, { ticketImage, voucherImage });
     tickets.unshift(ticket);
     saveLocalTickets();
     await saveToCloud({ upserts: [ticket] });
@@ -187,6 +193,7 @@ async function processBatchQueue() {
       }
 
       const ticket = buildTicket(data.ticket);
+      await storeTicketImages(ticket.id, { ticketImage: item.image, voucherImage: null });
       tickets.unshift(ticket);
       saveLocalTickets();
       await saveToCloud({ upserts: [ticket] });
@@ -400,14 +407,17 @@ function deleteTicket(id) {
   if (!ticket || !confirm(`Eliminar ticket de ${ticket.info.tienda || 'este comercio'}?`)) return;
   tickets = tickets.filter((item) => item.id !== id);
   saveLocalTickets();
+  deleteTicketImages(id);
   saveToCloud({ upserts: [], deletes: [id] });
   renderAll();
 }
 
-function duplicateTicket(id) {
+async function duplicateTicket(id) {
   const source = tickets.find((item) => item.id === id);
   if (!source) return;
   const copy = buildTicket(structuredClone(source.info));
+  const sourceImages = await getTicketImages(id);
+  if (sourceImages) await storeTicketImages(copy.id, sourceImages);
   tickets.unshift(copy);
   saveLocalTickets();
   saveToCloud({ upserts: [copy] });
@@ -482,6 +492,25 @@ function exportCsv() {
   downloadBlob(toCsv(rows), 'tickets.csv', 'text/csv;charset=utf-8');
 }
 
+async function exportZip() {
+  if (!tickets.length) return;
+  const button = $('export-zip');
+  button.disabled = true;
+  button.textContent = 'Generando ZIP...';
+  setStatus('Generando ZIP semanal...');
+
+  try {
+    await exportWeeklyZip(tickets, getTicketImages);
+    setStatus('ZIP generado');
+  } catch (error) {
+    showAlert(error.message || 'No se pudo generar el ZIP.', true);
+    setStatus('No se pudo generar el ZIP', true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Exportar ZIP semanal';
+  }
+}
+
 function backupJson() {
   downloadBlob(JSON.stringify(tickets, null, 2), `tickets-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
 }
@@ -491,6 +520,7 @@ function clearAllTickets() {
   const ids = tickets.map((ticket) => ticket.id);
   tickets = [];
   saveLocalTickets();
+  clearAllTicketImages();
   saveToCloud({ upserts: [], deletes: ids });
   renderAll();
 }
@@ -521,6 +551,62 @@ function loadLocalTickets() {
 
 function saveLocalTickets() {
   localStorage.setItem('tickets_v3', JSON.stringify(tickets));
+}
+
+function openImageDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(IMAGE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      request.result.createObjectStore(IMAGE_STORE_NAME, { keyPath: 'id' });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('No se pudo abrir IndexedDB.'));
+  });
+}
+
+async function storeTicketImages(id, images) {
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readwrite');
+    tx.objectStore(IMAGE_STORE_NAME).put({
+      id,
+      ticketImage: images.ticketImage || null,
+      voucherImage: images.voucherImage || null,
+      savedAt: new Date().toISOString()
+    });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('No se pudo guardar la imagen local.'));
+  });
+}
+
+async function getTicketImages(id) {
+  const db = await openImageDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readonly');
+    const request = tx.objectStore(IMAGE_STORE_NAME).get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error || new Error('No se pudo leer la imagen local.'));
+  });
+}
+
+async function deleteTicketImages(id) {
+  const db = await openImageDb();
+  return new Promise((resolve) => {
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readwrite');
+    tx.objectStore(IMAGE_STORE_NAME).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
+}
+
+async function clearAllTicketImages() {
+  const db = await openImageDb();
+  return new Promise((resolve) => {
+    const tx = db.transaction(IMAGE_STORE_NAME, 'readwrite');
+    tx.objectStore(IMAGE_STORE_NAME).clear();
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+  });
 }
 
 function setStatus(message, isError = false) {
