@@ -237,9 +237,9 @@ button {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 6px;
+  margin-right: auto;
 }
-.payment-control label,
-.currency-control {
+.payment-control label {
   display: grid;
   gap: 3px;
   color: var(--muted);
@@ -247,7 +247,6 @@ button {
   font-weight: 650;
 }
 .payment-control select,
-.currency-control select,
 .payment-input {
   min-height: 36px;
   border: 1px solid var(--line);
@@ -258,8 +257,6 @@ button {
   font-size: 14px;
 }
 .payment-control select { min-width: 112px; padding: 6px 28px 6px 9px; }
-.currency-control { margin-right: auto; }
-.currency-control select { min-width: 92px; padding: 6px 28px 6px 9px; }
 .payment-input { width: 92px; padding: 6px 9px; }
 .mini-btn { padding: 8px 10px; border-radius: 7px; background: #eef1ec; color: var(--text); }
 .mini-btn.danger { background: #fff2f1; color: var(--danger); }
@@ -334,7 +331,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
   .dropzone { min-height: 132px; }
   .ticket-actions { justify-content: stretch; }
   .payment-control { width: 100%; margin-right: 0; }
-  .currency-control { width: 100%; margin-right: 0; }
   .payment-control label { flex: 1 1 130px; }
-  .payment-control select, .currency-control select { width: 100%; }
+  .payment-control select { width: 100%; }
 }
