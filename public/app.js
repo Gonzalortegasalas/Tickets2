@@ -5,6 +5,7 @@ const categories = ['Alimentos', 'Supermercado', 'Restaurante', 'Transporte', 'G
 const IMAGE_DB_NAME = 'tickets2-images';
 const IMAGE_STORE_NAME = 'ticketImages';
 const fxRateCache = new Map();
+const knownPaymentAccounts = ['3139', '6679'];
 
 let tickets = loadLocalTickets();
 let ticketImage = null;
@@ -12,6 +13,7 @@ let batchQueue = [];
 let batchRunning = false;
 let pairQueue = [];
 let pairRunning = false;
+const customPaymentEditors = new Set();
 
 const $ = (id) => document.getElementById(id);
 
@@ -485,6 +487,8 @@ function renderTickets() {
 
   list.innerHTML = tickets.map((ticket) => {
     const info = ticket.info;
+    const paymentValue = paymentSelectValue(ticket);
+    const customValue = paymentDigits(info.tarjeta);
     const items = (info.items || []).slice(0, 8).map((item) => `
       <div class="item">
         <span>${escapeHtml(item.nombre || 'Producto')}</span>
@@ -503,6 +507,21 @@ function renderTickets() {
         </div>
         ${items ? `<div class="items">${items}</div>` : ''}
         <div class="ticket-actions">
+          <div class="payment-control">
+            <label>
+              <span>Cuenta</span>
+              <select data-action="payment-select" data-id="${ticket.id}">
+                <option value="cash" ${paymentValue === 'cash' ? 'selected' : ''}>Efectivo</option>
+                <option value="3139" ${paymentValue === '3139' ? 'selected' : ''}>3139</option>
+                <option value="6679" ${paymentValue === '6679' ? 'selected' : ''}>6679</option>
+                <option value="other" ${paymentValue === 'other' ? 'selected' : ''}>Otro...</option>
+              </select>
+            </label>
+            ${paymentValue === 'other' ? `
+              <input class="payment-input" data-payment-input="${ticket.id}" type="text" inputmode="numeric" maxlength="4" placeholder="4 dígitos" value="${escapeHtml(customValue)}">
+              <button class="mini-btn" data-action="payment-save" data-id="${ticket.id}" type="button">Guardar</button>
+            ` : ''}
+          </div>
           <button class="mini-btn" data-action="duplicate" data-id="${ticket.id}" type="button">Duplicar</button>
           <button class="mini-btn danger" data-action="delete" data-id="${ticket.id}" type="button">Eliminar</button>
         </div>
@@ -514,8 +533,69 @@ function renderTickets() {
     button.addEventListener('click', () => {
       if (button.dataset.action === 'delete') deleteTicket(button.dataset.id);
       if (button.dataset.action === 'duplicate') duplicateTicket(button.dataset.id);
+      if (button.dataset.action === 'payment-save') saveCustomPayment(button.dataset.id);
     });
   });
+
+  list.querySelectorAll('select[data-action="payment-select"]').forEach((select) => {
+    select.addEventListener('change', () => handlePaymentSelect(select.dataset.id, select.value));
+  });
+
+  list.querySelectorAll('input[data-payment-input]').forEach((input) => {
+    input.addEventListener('input', () => {
+      input.value = paymentDigits(input.value);
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') saveCustomPayment(input.dataset.paymentInput);
+    });
+  });
+}
+
+function paymentSelectValue(ticket) {
+  if (customPaymentEditors.has(ticket.id)) return 'other';
+  const digits = paymentDigits(ticket.info.tarjeta);
+  if (!digits) return 'cash';
+  return knownPaymentAccounts.includes(digits) ? digits : 'other';
+}
+
+function paymentDigits(value) {
+  return String(value || '').replace(/\D/g, '').slice(-4);
+}
+
+function handlePaymentSelect(id, value) {
+  if (value === 'other') {
+    customPaymentEditors.add(id);
+    renderTickets();
+    return;
+  }
+
+  customPaymentEditors.delete(id);
+  updateTicketPayment(id, value === 'cash' ? null : value);
+}
+
+function saveCustomPayment(id) {
+  const input = [...document.querySelectorAll('input[data-payment-input]')].find((element) => element.dataset.paymentInput === id);
+  const digits = paymentDigits(input?.value);
+  if (digits.length !== 4) {
+    showAlert('Ingresa 4 dígitos para la cuenta.', true);
+    input?.focus();
+    return;
+  }
+
+  customPaymentEditors.delete(id);
+  updateTicketPayment(id, digits);
+}
+
+function updateTicketPayment(id, account) {
+  const ticket = tickets.find((item) => item.id === id);
+  if (!ticket) return;
+
+  ticket.info.tarjeta = account || null;
+  ticket.updatedAt = new Date().toISOString();
+  saveLocalTickets();
+  saveToCloud({ upserts: [ticket] });
+  renderAll();
+  setStatus(account ? `Cuenta actualizada a ${account}` : 'Cuenta actualizada a efectivo');
 }
 
 function renderSummary() {

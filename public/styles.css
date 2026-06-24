@@ -231,7 +231,33 @@ button {
 .ticket-title { margin: 0; font-size: 16px; }
 .ticket-meta { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 .ticket-total { font-weight: 800; white-space: nowrap; }
-.ticket-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.ticket-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-end; gap: 8px; margin-top: 12px; }
+.payment-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 6px;
+  margin-right: auto;
+}
+.payment-control label {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.payment-control select,
+.payment-input {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.payment-control select { min-width: 112px; padding: 6px 28px 6px 9px; }
+.payment-input { width: 92px; padding: 6px 9px; }
 .mini-btn { padding: 8px 10px; border-radius: 7px; background: #eef1ec; color: var(--text); }
 .mini-btn.danger { background: #fff2f1; color: var(--danger); }
 .items { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
@@ -303,4 +329,8 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
   main { padding: 12px; }
   .capture-grid, .pair-grid { grid-template-columns: 1fr; }
   .dropzone { min-height: 132px; }
+  .ticket-actions { justify-content: stretch; }
+  .payment-control { width: 100%; margin-right: 0; }
+  .payment-control label { flex: 1 1 130px; }
+  .payment-control select { width: 100%; }
 }
