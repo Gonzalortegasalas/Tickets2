@@ -54,6 +54,28 @@
         <h2>Tickets</h2>
         <strong id="tickets-count">0 tickets</strong>
       </div>
+      <div class="ticket-filters">
+        <label>
+          <span>Ordenar</span>
+          <select id="ticket-sort">
+            <option value="newest">Más nuevo primero</option>
+            <option value="oldest">Más antiguo primero</option>
+            <option value="amount-desc">Mayor monto</option>
+            <option value="amount-asc">Menor monto</option>
+          </select>
+        </label>
+        <label>
+          <span>Cuenta</span>
+          <select id="ticket-account-filter">
+            <option value="all">Todas</option>
+            <option value="cash">Efectivo</option>
+            <option value="3139">3139</option>
+            <option value="6679">6679</option>
+            <option value="other">Otra tarjeta</option>
+          </select>
+        </label>
+        <button id="clear-ticket-filters" class="mini-btn" type="button">Limpiar</button>
+      </div>
       <div class="toolbar">
         <button id="export-csv" class="secondary-btn compact" type="button">Exportar CSV</button>
         <button id="export-zip" class="secondary-btn compact" type="button">Exportar ZIP semanal</button>

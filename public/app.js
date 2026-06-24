@@ -14,6 +14,10 @@ let batchRunning = false;
 let pairQueue = [];
 let pairRunning = false;
 const customPaymentEditors = new Set();
+const ticketView = {
+  sort: 'newest',
+  account: 'all'
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -31,6 +35,15 @@ function init() {
   $('export-zip').addEventListener('click', exportZip);
   $('reload-cloud').addEventListener('click', loadFromCloud);
   $('delete-all-tickets').addEventListener('click', clearAllTickets);
+  $('ticket-sort').addEventListener('change', () => {
+    ticketView.sort = $('ticket-sort').value;
+    renderTickets();
+  });
+  $('ticket-account-filter').addEventListener('change', () => {
+    ticketView.account = $('ticket-account-filter').value;
+    renderTickets();
+  });
+  $('clear-ticket-filters').addEventListener('click', clearTicketFilters);
   $('backup-json').addEventListener('click', backupJson);
   $('clear-all').addEventListener('click', clearAllTickets);
 
@@ -481,13 +494,21 @@ function renderAll() {
 
 function renderTickets() {
   const list = $('tickets-list');
-  $('tickets-count').textContent = `${tickets.length} ${tickets.length === 1 ? 'ticket' : 'tickets'}`;
+  const visibleTickets = getVisibleTickets();
+  const filtered = visibleTickets.length !== tickets.length || ticketView.account !== 'all';
+  $('tickets-count').textContent = filtered
+    ? `${visibleTickets.length} de ${tickets.length} tickets`
+    : `${tickets.length} ${tickets.length === 1 ? 'ticket' : 'tickets'}`;
   if (!tickets.length) {
     list.innerHTML = '<div class="empty">Escanea o registra tu primer ticket.</div>';
     return;
   }
+  if (!visibleTickets.length) {
+    list.innerHTML = '<div class="empty">No hay tickets con esos filtros.</div>';
+    return;
+  }
 
-  list.innerHTML = tickets.map((ticket) => {
+  list.innerHTML = visibleTickets.map((ticket) => {
     const info = ticket.info;
     const paymentValue = paymentSelectValue(ticket);
     const customValue = paymentDigits(info.tarjeta);
@@ -572,6 +593,69 @@ function renderTickets() {
       if (event.key === 'Enter') saveCustomPayment(input.dataset.paymentInput);
     });
   });
+}
+
+function getVisibleTickets() {
+  return tickets
+    .filter((ticket) => matchesAccountFilter(ticket))
+    .slice()
+    .sort(compareTicketsForView);
+}
+
+function matchesAccountFilter(ticket) {
+  if (ticketView.account === 'all') return true;
+  const account = ticketAccountGroup(ticket);
+  return account === ticketView.account;
+}
+
+function ticketAccountGroup(ticket) {
+  const digits = paymentDigits(ticket.info?.tarjeta);
+  if (!digits) return 'cash';
+  if (digits === '3139' || digits === '6679') return digits;
+  return 'other';
+}
+
+function compareTicketsForView(a, b) {
+  if (ticketView.sort === 'oldest') {
+    return ticketDateValue(a) - ticketDateValue(b);
+  }
+  if (ticketView.sort === 'amount-desc') {
+    return numberOrZero(b.info?.total) - numberOrZero(a.info?.total);
+  }
+  if (ticketView.sort === 'amount-asc') {
+    return numberOrZero(a.info?.total) - numberOrZero(b.info?.total);
+  }
+  return ticketDateValue(b) - ticketDateValue(a);
+}
+
+function ticketDateValue(ticket) {
+  const parsed = parseTicketDate(ticket.info?.fecha);
+  if (parsed) return parsed.getTime();
+  const saved = new Date(ticket.savedAt || ticket.updatedAt || 0).getTime();
+  return Number.isFinite(saved) ? saved : 0;
+}
+
+function parseTicketDate(fecha) {
+  const value = String(fecha || '');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const date = new Date(`${value}T00:00:00`);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const parts = value.split('/').map(Number);
+  if (parts.length === 3 && parts.every(Boolean)) {
+    const [day, month, year] = parts;
+    const date = new Date(year, month - 1, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+
+function clearTicketFilters() {
+  ticketView.sort = 'newest';
+  ticketView.account = 'all';
+  $('ticket-sort').value = ticketView.sort;
+  $('ticket-account-filter').value = ticketView.account;
+  renderTickets();
 }
 
 function paymentSelectValue(ticket) {
