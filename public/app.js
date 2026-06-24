@@ -489,6 +489,11 @@ function renderTickets() {
     const info = ticket.info;
     const paymentValue = paymentSelectValue(ticket);
     const customValue = paymentDigits(info.tarjeta);
+    const faceAmount = ticketFaceAmount(info);
+    const faceCurrency = ticketFaceCurrency(info);
+    const conversionMeta = faceCurrency === 'EUR' && info.tipo_cambio
+      ? `Original: EUR ${faceAmount.toFixed(2)} · TC ${info.tipo_cambio}`
+      : '';
     const items = (info.items || []).slice(0, 8).map((item) => `
       <div class="item">
         <span>${escapeHtml(item.nombre || 'Producto')}</span>
@@ -502,25 +507,40 @@ function renderTickets() {
           <div>
             <h3 class="ticket-title">${escapeHtml(info.tienda || 'Comercio')}</h3>
             <p class="ticket-meta">${escapeHtml(info.categoria || 'Otro')} · ${escapeHtml(info.fecha || 'Sin fecha')} ${info.tarjeta ? `· ${escapeHtml(info.tarjeta)}` : ''}</p>
+            ${conversionMeta ? `<p class="ticket-meta">${escapeHtml(conversionMeta)}</p>` : ''}
           </div>
           <div class="ticket-total">${formatCurrency(info.total)}</div>
         </div>
         ${items ? `<div class="items">${items}</div>` : ''}
         <div class="ticket-actions">
-          <div class="payment-control">
-            <label>
-              <span>Cuenta</span>
-              <select data-action="payment-select" data-id="${ticket.id}">
-                <option value="cash" ${paymentValue === 'cash' ? 'selected' : ''}>Efectivo</option>
-                <option value="3139" ${paymentValue === '3139' ? 'selected' : ''}>3139</option>
-                <option value="6679" ${paymentValue === '6679' ? 'selected' : ''}>6679</option>
-                <option value="other" ${paymentValue === 'other' ? 'selected' : ''}>Otro...</option>
+          <div class="ticket-edit-controls">
+            <div class="payment-control">
+              <label>
+                <span>Cuenta</span>
+                <select data-action="payment-select" data-id="${ticket.id}">
+                  <option value="cash" ${paymentValue === 'cash' ? 'selected' : ''}>Efectivo</option>
+                  <option value="3139" ${paymentValue === '3139' ? 'selected' : ''}>3139</option>
+                  <option value="6679" ${paymentValue === '6679' ? 'selected' : ''}>6679</option>
+                  <option value="other" ${paymentValue === 'other' ? 'selected' : ''}>Otro...</option>
+                </select>
+              </label>
+              ${paymentValue === 'other' ? `
+                <input class="payment-input" data-payment-input="${ticket.id}" type="text" inputmode="numeric" maxlength="4" placeholder="4 dígitos" value="${escapeHtml(customValue)}">
+                <button class="mini-btn" data-action="payment-save" data-id="${ticket.id}" type="button">Guardar</button>
+              ` : ''}
+            </div>
+            <label class="amount-control">
+              <span>Monto ticket</span>
+              <input data-ticket-amount="${ticket.id}" type="text" inputmode="decimal" value="${faceAmount.toFixed(2)}">
+            </label>
+            <label class="currency-control">
+              <span>Moneda</span>
+              <select data-ticket-currency="${ticket.id}">
+                <option value="MXN" ${faceCurrency === 'MXN' ? 'selected' : ''}>MXN</option>
+                <option value="EUR" ${faceCurrency === 'EUR' ? 'selected' : ''}>EUR</option>
               </select>
             </label>
-            ${paymentValue === 'other' ? `
-              <input class="payment-input" data-payment-input="${ticket.id}" type="text" inputmode="numeric" maxlength="4" placeholder="4 dígitos" value="${escapeHtml(customValue)}">
-              <button class="mini-btn" data-action="payment-save" data-id="${ticket.id}" type="button">Guardar</button>
-            ` : ''}
+            <button class="mini-btn" data-action="currency-apply" data-id="${ticket.id}" type="button">Aplicar</button>
           </div>
           <button class="mini-btn" data-action="duplicate" data-id="${ticket.id}" type="button">Duplicar</button>
           <button class="mini-btn danger" data-action="delete" data-id="${ticket.id}" type="button">Eliminar</button>
@@ -534,6 +554,7 @@ function renderTickets() {
       if (button.dataset.action === 'delete') deleteTicket(button.dataset.id);
       if (button.dataset.action === 'duplicate') duplicateTicket(button.dataset.id);
       if (button.dataset.action === 'payment-save') saveCustomPayment(button.dataset.id);
+      if (button.dataset.action === 'currency-apply') applyTicketAmountCurrency(button.dataset.id);
     });
   });
 
@@ -596,6 +617,112 @@ function updateTicketPayment(id, account) {
   saveToCloud({ upserts: [ticket] });
   renderAll();
   setStatus(account ? `Cuenta actualizada a ${account}` : 'Cuenta actualizada a efectivo');
+}
+
+function ticketFaceCurrency(info) {
+  const manualCurrency = String(info.moneda_ticket || '').toUpperCase();
+  if (manualCurrency === 'EUR' || manualCurrency === 'MXN') return manualCurrency;
+  const originalCurrency = String(info.moneda_original || '').toUpperCase();
+  if (originalCurrency === 'EUR') return 'EUR';
+  return 'MXN';
+}
+
+function ticketFaceAmount(info) {
+  const manualAmount = numberOrZero(info.monto_ticket);
+  if (manualAmount > 0) return manualAmount;
+  if (ticketFaceCurrency(info) === 'EUR' && numberOrZero(info.total_original) > 0) {
+    return numberOrZero(info.total_original);
+  }
+  return numberOrZero(info.total);
+}
+
+async function applyTicketAmountCurrency(id) {
+  const ticket = tickets.find((item) => item.id === id);
+  const amountInput = [...document.querySelectorAll('input[data-ticket-amount]')].find((input) => input.dataset.ticketAmount === id);
+  const currencySelect = [...document.querySelectorAll('select[data-ticket-currency]')].find((select) => select.dataset.ticketCurrency === id);
+  if (!ticket || !amountInput || !currencySelect) return;
+
+  const amount = parseMoneyInput(amountInput.value);
+  const currency = currencySelect.value === 'EUR' ? 'EUR' : 'MXN';
+  if (!Number.isFinite(amount) || amount <= 0) {
+    showAlert('Ingresa un monto válido del ticket.', true);
+    amountInput.focus();
+    return;
+  }
+
+  try {
+    setStatus(`Aplicando monto en ${currency}...`);
+    ticket.info = await buildCurrencyCorrectedInfo(ticket.info, amount, currency);
+    ticket.updatedAt = new Date().toISOString();
+    saveLocalTickets();
+    await saveToCloud({ upserts: [ticket] });
+    renderAll();
+    setStatus(currency === 'EUR' ? 'Monto convertido de EUR a MXN' : 'Monto guardado como MXN');
+  } catch (error) {
+    showAlert(error.message || 'No se pudo aplicar la moneda.', true);
+  }
+}
+
+async function buildCurrencyCorrectedInfo(info, amount, currency) {
+  let fx = null;
+  let totalMxn = roundMoney(amount);
+
+  if (currency === 'EUR') {
+    const date = dateForFx(info.fecha);
+    fx = await getHistoricalRate('EUR', date);
+    totalMxn = roundMoney(amount * fx.rate);
+  }
+
+  const currentTotal = numberOrZero(info.total);
+  const factor = currentTotal > 0 ? totalMxn / currentTotal : 1;
+  const corrected = currentTotal > 0 ? scaleTicketAmounts(info, factor) : { ...info };
+
+  corrected.total = totalMxn;
+  corrected.moneda = 'MXN';
+  corrected.monto_ticket = roundMoney(amount);
+  corrected.moneda_ticket = currency;
+  corrected.moneda_original = currency === 'EUR' ? 'EUR' : null;
+  corrected.total_original = currency === 'EUR' ? roundMoney(amount) : 0;
+  corrected.tipo_cambio = fx?.rate || null;
+  corrected.fecha_tipo_cambio = fx?.date || null;
+  corrected.fuente_tipo_cambio = fx?.source || null;
+  corrected.notas = appendUniqueNote(
+    corrected.notas,
+    currency === 'EUR'
+      ? 'Corregido manualmente: monto del ticket en EUR convertido a MXN'
+      : 'Corregido manualmente: monto del ticket en MXN sin conversion'
+  );
+
+  return corrected;
+}
+
+function scaleTicketAmounts(info, factor) {
+  const scaled = {
+    ...info,
+    total: roundMoney(numberOrZero(info.total) * factor),
+    subtotal: roundMoney(numberOrZero(info.subtotal) * factor),
+    impuestos: roundMoney(numberOrZero(info.impuestos) * factor),
+    total_ticket: roundMoney(numberOrZero(info.total_ticket) * factor),
+    total_comprobante: roundMoney(numberOrZero(info.total_comprobante) * factor),
+    propina: roundMoney(numberOrZero(info.propina) * factor)
+  };
+
+  if (Array.isArray(info.items)) {
+    scaled.items = info.items.map((item) => ({
+      ...item,
+      precio: roundMoney(numberOrZero(item.precio) * factor)
+    }));
+  }
+
+  return scaled;
+}
+
+function parseMoneyInput(value) {
+  const raw = String(value || '').trim().replace(/\s/g, '');
+  const normalized = raw.includes(',') && raw.includes('.')
+    ? raw.replace(/,/g, '')
+    : raw.replace(',', '.');
+  return Number(normalized);
 }
 
 function renderSummary() {
