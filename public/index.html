@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f7f7f4">
+  <title>Tickets IA</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1 id="page-title">Escanear Ticket</h1>
+    <p id="sync-status">Listo</p>
+  </header>
+
+  <main>
+    <section id="view-scan" class="view active">
+      <div class="scan-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Ticket</h2>
+            <button id="clear-ticket" class="icon-btn" type="button" title="Quitar ticket" hidden>×</button>
+          </div>
+          <label class="dropzone">
+            <input id="ticket-input" type="file" accept="image/*" capture="environment">
+            <span class="drop-icon">⌁</span>
+            <span>Tomar foto</span>
+            <small>Ticket completo y legible</small>
+          </label>
+          <img id="ticket-preview" class="preview" alt="Vista previa del ticket" hidden>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>Comprobante</h2>
+            <button id="clear-voucher" class="icon-btn" type="button" title="Quitar comprobante" hidden>×</button>
+          </div>
+          <label class="dropzone">
+            <input id="voucher-input" type="file" accept="image/*" capture="environment">
+            <span class="drop-icon">▣</span>
+            <span>Opcional</span>
+            <small>Terminal bancaria o propina</small>
+          </label>
+          <img id="voucher-preview" class="preview" alt="Vista previa del comprobante" hidden>
+        </article>
+      </div>
+
+      <button id="scan-btn" class="primary-btn" type="button" disabled>Analizar con OpenAI</button>
+      <button id="manual-btn" class="secondary-btn" type="button">Registrar manualmente</button>
+      <div id="scan-result"></div>
+    </section>
+
+    <section id="view-tickets" class="view">
+      <div class="toolbar">
+        <button id="export-csv" class="secondary-btn compact" type="button">Exportar CSV</button>
+        <button id="reload-cloud" class="secondary-btn compact" type="button">Sincronizar</button>
+      </div>
+      <div id="tickets-list"></div>
+    </section>
+
+    <section id="view-summary" class="view">
+      <div class="stats">
+        <article><span>Tickets</span><strong id="stat-count">0</strong></article>
+        <article><span>Gasto total</span><strong id="stat-total">$0</strong></article>
+        <article><span>Categorías</span><strong id="stat-categories">0</strong></article>
+        <article><span>Promedio</span><strong id="stat-average">$0</strong></article>
+      </div>
+      <div id="category-bars"></div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <article class="panel settings-panel">
+        <h2>OpenAI</h2>
+        <p>La API key se configura como secret del Worker. No se guarda en el navegador.</p>
+        <code>wrangler secret put OPENAI_API_KEY</code>
+      </article>
+      <article class="panel settings-panel">
+        <h2>Modelo</h2>
+        <p>El modelo se cambia en <code>wrangler.toml</code> con <code>OPENAI_MODEL</code>.</p>
+      </article>
+      <article class="panel settings-panel">
+        <h2>Respaldo local</h2>
+        <button id="backup-json" class="secondary-btn" type="button">Descargar JSON</button>
+        <button id="clear-all" class="danger-btn" type="button">Borrar tickets</button>
+      </article>
+    </section>
+  </main>
+
+  <dialog id="manual-dialog">
+    <form method="dialog" class="manual-form">
+      <h2>Registrar manualmente</h2>
+      <label>Tienda<input id="manual-store" type="text" autocomplete="off"></label>
+      <label>Fecha<input id="manual-date" type="date"></label>
+      <label>Categoría<select id="manual-category"></select></label>
+      <label>Total<input id="manual-total" type="number" inputmode="decimal" step="0.01"></label>
+      <label>Tarjeta<input id="manual-card" type="text" inputmode="numeric" maxlength="4"></label>
+      <menu>
+        <button value="cancel" class="secondary-btn" type="submit">Cancelar</button>
+        <button id="save-manual" value="default" class="primary-btn" type="button">Guardar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="scan" type="button">Escanear</button>
+    <button class="tab" data-view="tickets" type="button">Tickets</button>
+    <button class="tab" data-view="summary" type="button">Resumen</button>
+    <button class="tab" data-view="settings" type="button">Config</button>
+  </nav>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
