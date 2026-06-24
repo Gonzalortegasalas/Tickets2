@@ -275,6 +275,19 @@ button {
 .items { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 .item { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; color: var(--muted); font-size: 13px; }
 
+.tickets-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.tickets-head h2 { margin: 0; font-size: 18px; }
+.tickets-head strong {
+  color: var(--accent);
+  font-size: 14px;
+  white-space: nowrap;
+}
 .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .stats article {

@@ -481,6 +481,7 @@ function renderAll() {
 
 function renderTickets() {
   const list = $('tickets-list');
+  $('tickets-count').textContent = `${tickets.length} ${tickets.length === 1 ? 'ticket' : 'tickets'}`;
   if (!tickets.length) {
     list.innerHTML = '<div class="empty">Escanea o registra tu primer ticket.</div>';
     return;
