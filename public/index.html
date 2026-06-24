@@ -28,6 +28,14 @@
             <small>Ticket completo y legible</small>
           </label>
           <img id="ticket-preview" class="preview" alt="Vista previa del ticket" hidden>
+          <div class="batch-block">
+            <h3>Seleccionar varios tickets</h3>
+            <label class="multi-picker">
+              <input id="batch-input" type="file" accept="image/*" multiple>
+              <span>Elegir varias fotos</span>
+              <small>Se analizan una por una para evitar errores</small>
+            </label>
+          </div>
         </article>
 
         <article class="panel">
@@ -46,6 +54,8 @@
       </div>
 
       <button id="scan-btn" class="primary-btn" type="button" disabled>Analizar con OpenAI</button>
+      <button id="batch-scan-btn" class="secondary-btn" type="button" disabled>Analizar varios tickets</button>
+      <div id="batch-list" class="batch-list" hidden></div>
       <button id="manual-btn" class="secondary-btn" type="button">Registrar manualmente</button>
       <div id="scan-result"></div>
     </section>

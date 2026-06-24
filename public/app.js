@@ -4,6 +4,8 @@ const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN
 let tickets = loadLocalTickets();
 let ticketImage = null;
 let voucherImage = null;
+let batchQueue = [];
+let batchRunning = false;
 
 const $ = (id) => document.getElementById(id);
 
@@ -12,9 +14,11 @@ init();
 function init() {
   $('ticket-input').addEventListener('change', (event) => loadImage(event, 'ticket'));
   $('voucher-input').addEventListener('change', (event) => loadImage(event, 'voucher'));
+  $('batch-input').addEventListener('change', loadBatchImages);
   $('clear-ticket').addEventListener('click', clearTicketImage);
   $('clear-voucher').addEventListener('click', clearVoucherImage);
   $('scan-btn').addEventListener('click', scanTicket);
+  $('batch-scan-btn').addEventListener('click', processBatchQueue);
   $('manual-btn').addEventListener('click', openManualDialog);
   $('save-manual').addEventListener('click', saveManualTicket);
   $('export-csv').addEventListener('click', exportCsv);
@@ -56,6 +60,40 @@ async function loadImage(event, kind) {
     setStatus('Imagen lista');
   } catch (error) {
     showAlert(error.message || 'No se pudo preparar la imagen.', true);
+  }
+}
+
+async function loadBatchImages(event) {
+  const files = [...(event.target.files || [])];
+  if (!files.length) return;
+
+  batchQueue = files.map((file) => ({
+    id: crypto.randomUUID ? crypto.randomUUID() : `batch-${Date.now()}-${Math.random()}`,
+    name: file.name || 'Ticket',
+    file,
+    image: null,
+    status: 'pendiente',
+    error: null
+  }));
+
+  $('batch-scan-btn').disabled = true;
+  renderBatchQueue();
+
+  try {
+    setStatus(`Preparando ${files.length} tickets...`);
+    for (const item of batchQueue) {
+      item.status = 'comprimiendo';
+      renderBatchQueue();
+      item.image = await compressImage(item.file, 1800, 0.82);
+      item.file = null;
+      item.status = 'pendiente';
+      renderBatchQueue();
+    }
+    $('batch-scan-btn').disabled = batchRunning || !batchQueue.length;
+    setStatus(`${batchQueue.length} tickets listos para analizar`);
+  } catch (error) {
+    setStatus('No se pudo preparar el lote', true);
+    showAlert(error.message || 'No se pudieron preparar las imágenes.', true);
   }
 }
 
@@ -116,6 +154,88 @@ async function scanTicket() {
     $('scan-btn').textContent = 'Analizar con OpenAI';
     $('scan-btn').disabled = !ticketImage;
   }
+}
+
+async function processBatchQueue() {
+  if (!batchQueue.length || batchRunning) return;
+
+  batchRunning = true;
+  $('batch-scan-btn').disabled = true;
+  $('scan-btn').disabled = true;
+  $('scan-result').innerHTML = '<div class="alert ok">Analizando lote de tickets...</div>';
+
+  let saved = 0;
+  let failed = 0;
+
+  for (const item of batchQueue) {
+    if (!item.image || item.status === 'guardado') continue;
+
+    item.status = 'analizando';
+    item.error = null;
+    renderBatchQueue();
+    setStatus(`Analizando ${saved + failed + 1} de ${batchQueue.length}...`);
+
+    try {
+      const response = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketImage: item.image, voucherImage: null })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error?.message || 'No se pudo escanear este ticket.');
+      }
+
+      const ticket = buildTicket(data.ticket);
+      tickets.unshift(ticket);
+      saveLocalTickets();
+      await saveToCloud({ upserts: [ticket] });
+      item.status = 'guardado';
+      item.ticketId = ticket.id;
+      saved += 1;
+    } catch (error) {
+      item.status = 'error';
+      item.error = error.message || 'Error';
+      failed += 1;
+    }
+
+    renderBatchQueue();
+    renderAll();
+  }
+
+  batchRunning = false;
+  $('batch-scan-btn').disabled = !batchQueue.some((item) => item.status === 'pendiente' || item.status === 'error');
+  $('scan-btn').disabled = !ticketImage;
+  $('scan-result').innerHTML = `<div class="alert ${failed ? 'error' : 'ok'}">Lote terminado: ${saved} guardados, ${failed} con error.</div>`;
+  setStatus(`Lote terminado: ${saved} guardados, ${failed} con error`, Boolean(failed));
+}
+
+function renderBatchQueue() {
+  const list = $('batch-list');
+  if (!batchQueue.length) {
+    list.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+
+  list.hidden = false;
+  list.innerHTML = batchQueue.map((item) => {
+    const label = batchStatusLabel(item);
+    return `
+      <div class="batch-item">
+        <span class="batch-name">${escapeHtml(item.name)}</span>
+        <span class="batch-status ${label.className}" title="${escapeHtml(item.error || label.text)}">${escapeHtml(label.text)}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function batchStatusLabel(item) {
+  if (item.status === 'comprimiendo') return { text: 'Comprimiendo', className: 'running' };
+  if (item.status === 'analizando') return { text: 'Analizando', className: 'running' };
+  if (item.status === 'guardado') return { text: 'Guardado', className: 'done' };
+  if (item.status === 'error') return { text: 'Error', className: 'error' };
+  return { text: 'Pendiente', className: '' };
 }
 
 function buildTicket(info) {
@@ -347,8 +467,9 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Fecha', 'Tienda', 'Categoria', 'Total', 'Moneda', 'Tarjeta', 'Notas'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total', 'Moneda', 'Tarjeta', 'Notas'],
     ...tickets.map((ticket) => [
+      'GOS',
       ticket.info.fecha || '',
       ticket.info.tienda || '',
       ticket.info.categoria || '',

@@ -79,6 +79,61 @@ code { display: inline-block; padding: 2px 5px; border-radius: 5px; background: 
   background: #fff;
 }
 
+.batch-block {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.batch-block h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.multi-picker {
+  display: block;
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  cursor: pointer;
+  color: var(--muted);
+  background: #fbfcfa;
+}
+.multi-picker input { display: none; }
+.multi-picker span {
+  display: block;
+  color: var(--accent);
+  font-weight: 750;
+}
+.multi-picker small {
+  display: block;
+  margin-top: 3px;
+}
+.batch-list {
+  margin-top: 10px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.batch-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.batch-item:last-child { border-bottom: 0; }
+.batch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-status { color: var(--muted); font-weight: 650; }
+.batch-status.done { color: var(--ok); }
+.batch-status.error { color: var(--danger); }
+.batch-status.running { color: var(--accent); }
+
 button {
   font: inherit;
   border: 0;
