@@ -1,28 +1,28 @@
 import { exportWeeklyZip } from './exportZip.js';
+import { buildCodificacion, dateForFx, numberOrZero, roundMoney } from './exportHelpers.js';
 
 const categories = ['Alimentos', 'Supermercado', 'Restaurante', 'Transporte', 'Gasolina', 'Salud', 'Farmacia', 'Tecnologia', 'Electronica', 'Hogar', 'Ferreteria', 'Ropa', 'Otro'];
-const money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
 const IMAGE_DB_NAME = 'tickets2-images';
 const IMAGE_STORE_NAME = 'ticketImages';
+const fxRateCache = new Map();
 
 let tickets = loadLocalTickets();
 let ticketImage = null;
-let voucherImage = null;
 let batchQueue = [];
 let batchRunning = false;
+let pairQueue = [];
+let pairRunning = false;
 
 const $ = (id) => document.getElementById(id);
 
 init();
 
 function init() {
-  $('ticket-input').addEventListener('change', (event) => loadImage(event, 'ticket'));
-  $('voucher-input').addEventListener('change', (event) => loadImage(event, 'voucher'));
-  $('batch-input').addEventListener('change', loadBatchImages);
+  $('ticket-input').addEventListener('change', loadTicketSelection);
   $('clear-ticket').addEventListener('click', clearTicketImage);
-  $('clear-voucher').addEventListener('click', clearVoucherImage);
-  $('scan-btn').addEventListener('click', scanTicket);
-  $('batch-scan-btn').addEventListener('click', processBatchQueue);
+  $('scan-btn').addEventListener('click', processTicketSelection);
+  $('add-pair-btn').addEventListener('click', addPair);
+  $('pair-scan-btn').addEventListener('click', processPairQueue);
   $('manual-btn').addEventListener('click', openManualDialog);
   $('save-manual').addEventListener('click', saveManualTicket);
   $('export-csv').addEventListener('click', exportCsv);
@@ -40,38 +40,42 @@ function init() {
   $('manual-date').valueAsDate = new Date();
 
   renderAll();
+  addPair();
+  ensureTicketsInMxn({ persist: true });
   loadFromCloud();
 }
 
-async function loadImage(event, kind) {
-  const file = event.target.files?.[0];
-  if (!file) return;
+async function loadTicketSelection(event) {
+  const files = [...(event.target.files || [])];
+  if (!files.length) return;
 
   try {
-    setStatus('Preparando imagen...');
-    const dataUrl = await compressImage(file, 1800, 0.82);
-    if (kind === 'ticket') {
-      ticketImage = dataUrl;
-      $('ticket-preview').src = dataUrl;
-      $('ticket-preview').hidden = false;
-      $('clear-ticket').hidden = false;
-      $('scan-btn').disabled = false;
-    } else {
-      voucherImage = dataUrl;
-      $('voucher-preview').src = dataUrl;
-      $('voucher-preview').hidden = false;
-      $('clear-voucher').hidden = false;
+    if (files.length === 1) {
+      await loadSingleTicketImage(files[0]);
+      return;
     }
-    setStatus('Imagen lista');
+
+    await loadBatchImages(files);
   } catch (error) {
     showAlert(error.message || 'No se pudo preparar la imagen.', true);
   }
 }
 
-async function loadBatchImages(event) {
-  const files = [...(event.target.files || [])];
-  if (!files.length) return;
+async function loadSingleTicketImage(file) {
+  resetBatchQueue();
+  setStatus('Preparando imagen...');
+  ticketImage = await compressImage(file, 1800, 0.82);
+  $('ticket-preview').src = ticketImage;
+  $('ticket-preview').hidden = false;
+  $('clear-ticket').hidden = false;
+  updateTicketActionButton();
+  setStatus('Ticket listo para analizar');
+}
 
+async function loadBatchImages(files) {
+  ticketImage = null;
+  $('ticket-preview').hidden = true;
+  $('ticket-preview').removeAttribute('src');
   batchQueue = files.map((file) => ({
     id: crypto.randomUUID ? crypto.randomUUID() : `batch-${Date.now()}-${Math.random()}`,
     name: file.name || 'Ticket',
@@ -81,7 +85,8 @@ async function loadBatchImages(event) {
     error: null
   }));
 
-  $('batch-scan-btn').disabled = true;
+  $('clear-ticket').hidden = false;
+  updateTicketActionButton();
   renderBatchQueue();
 
   try {
@@ -94,7 +99,7 @@ async function loadBatchImages(event) {
       item.status = 'pendiente';
       renderBatchQueue();
     }
-    $('batch-scan-btn').disabled = batchRunning || !batchQueue.length;
+    updateTicketActionButton();
     setStatus(`${batchQueue.length} tickets listos para analizar`);
   } catch (error) {
     setStatus('No se pudo preparar el lote', true);
@@ -126,6 +131,14 @@ function compressImage(file, maxEdge, quality) {
   });
 }
 
+async function processTicketSelection() {
+  if (batchQueue.length) {
+    await processBatchQueue();
+    return;
+  }
+  await scanTicket();
+}
+
 async function scanTicket() {
   if (!ticketImage) return;
 
@@ -137,28 +150,27 @@ async function scanTicket() {
     const response = await fetch('/api/scan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticketImage, voucherImage })
+      body: JSON.stringify({ ticketImage, voucherImage: null })
     });
     const data = await response.json();
     if (!response.ok || !data.ok) {
       throw new Error(data?.error?.message || 'No se pudo escanear el ticket.');
     }
 
-    const ticket = buildTicket(data.ticket);
-    await storeTicketImages(ticket.id, { ticketImage, voucherImage });
+    const info = await convertInfoToMxn(data.ticket);
+    const ticket = buildTicket(info);
+    await storeTicketImages(ticket.id, { ticketImage, voucherImage: null });
     tickets.unshift(ticket);
     saveLocalTickets();
     await saveToCloud({ upserts: [ticket] });
     showScanResult(ticket);
     clearTicketImage(false);
-    clearVoucherImage(false);
     renderAll();
     setStatus('Ticket guardado');
   } catch (error) {
     showAlert(error.message || 'Error escaneando ticket.', true);
   } finally {
-    $('scan-btn').textContent = 'Analizar con OpenAI';
-    $('scan-btn').disabled = !ticketImage;
+    updateTicketActionButton();
   }
 }
 
@@ -166,8 +178,8 @@ async function processBatchQueue() {
   if (!batchQueue.length || batchRunning) return;
 
   batchRunning = true;
-  $('batch-scan-btn').disabled = true;
   $('scan-btn').disabled = true;
+  $('scan-btn').textContent = 'Analizando...';
   $('scan-result').innerHTML = '<div class="alert ok">Analizando lote de tickets...</div>';
 
   let saved = 0;
@@ -192,7 +204,8 @@ async function processBatchQueue() {
         throw new Error(data?.error?.message || 'No se pudo escanear este ticket.');
       }
 
-      const ticket = buildTicket(data.ticket);
+      const info = await convertInfoToMxn(data.ticket);
+      const ticket = buildTicket(info);
       await storeTicketImages(ticket.id, { ticketImage: item.image, voucherImage: null });
       tickets.unshift(ticket);
       saveLocalTickets();
@@ -211,8 +224,7 @@ async function processBatchQueue() {
   }
 
   batchRunning = false;
-  $('batch-scan-btn').disabled = !batchQueue.some((item) => item.status === 'pendiente' || item.status === 'error');
-  $('scan-btn').disabled = !ticketImage;
+  updateTicketActionButton();
   $('scan-result').innerHTML = `<div class="alert ${failed ? 'error' : 'ok'}">Lote terminado: ${saved} guardados, ${failed} con error.</div>`;
   setStatus(`Lote terminado: ${saved} guardados, ${failed} con error`, Boolean(failed));
 }
@@ -237,12 +249,189 @@ function renderBatchQueue() {
   }).join('');
 }
 
+function updateTicketActionButton() {
+  if (batchRunning) {
+    $('scan-btn').disabled = true;
+    $('scan-btn').textContent = 'Analizando...';
+    return;
+  }
+
+  if (batchQueue.length) {
+    const hasPending = batchQueue.some((item) => item.image && item.status !== 'guardado');
+    $('scan-btn').textContent = batchQueue.length === 1 ? 'Analizar un ticket' : 'Analizar varios tickets';
+    $('scan-btn').disabled = !hasPending;
+    return;
+  }
+
+  $('scan-btn').textContent = 'Analizar un ticket';
+  $('scan-btn').disabled = !ticketImage;
+}
+
+function resetBatchQueue() {
+  batchQueue = [];
+  renderBatchQueue();
+}
+
 function batchStatusLabel(item) {
   if (item.status === 'comprimiendo') return { text: 'Comprimiendo', className: 'running' };
   if (item.status === 'analizando') return { text: 'Analizando', className: 'running' };
   if (item.status === 'guardado') return { text: 'Guardado', className: 'done' };
   if (item.status === 'error') return { text: 'Error', className: 'error' };
   return { text: 'Pendiente', className: '' };
+}
+
+function addPair() {
+  pairQueue.push({
+    id: crypto.randomUUID ? crypto.randomUUID() : `pair-${Date.now()}-${Math.random()}`,
+    ticketImage: null,
+    voucherImage: null,
+    ticketName: '',
+    voucherName: '',
+    status: 'pendiente',
+    error: null
+  });
+  renderPairQueue();
+}
+
+async function loadPairImage(event, pairId, kind) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  const pair = pairQueue.find((item) => item.id === pairId);
+  if (!pair) return;
+
+  try {
+    pair.status = 'comprimiendo';
+    pair.error = null;
+    renderPairQueue();
+    const dataUrl = await compressImage(file, 1800, 0.82);
+    if (kind === 'ticket') {
+      pair.ticketImage = dataUrl;
+      pair.ticketName = file.name || 'Ticket';
+    } else {
+      pair.voucherImage = dataUrl;
+      pair.voucherName = file.name || 'Comprobante';
+    }
+    pair.status = pairReady(pair) ? 'listo' : 'pendiente';
+    renderPairQueue();
+  } catch (error) {
+    pair.status = 'error';
+    pair.error = error.message || 'No se pudo preparar la imagen.';
+    renderPairQueue();
+  }
+}
+
+async function processPairQueue() {
+  const readyPairs = pairQueue.filter((pair) => pairReady(pair) && pair.status !== 'guardado');
+  if (!readyPairs.length || pairRunning) return;
+
+  pairRunning = true;
+  $('pair-scan-btn').disabled = true;
+  $('scan-btn').disabled = true;
+  $('scan-result').innerHTML = '<div class="alert ok">Analizando pares ticket + comprobante...</div>';
+
+  let saved = 0;
+  let failed = 0;
+
+  for (const pair of readyPairs) {
+    pair.status = 'analizando';
+    pair.error = null;
+    renderPairQueue();
+    setStatus(`Analizando par ${saved + failed + 1} de ${readyPairs.length}...`);
+
+    try {
+      const response = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticketImage: pair.ticketImage, voucherImage: pair.voucherImage })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) {
+        throw new Error(data?.error?.message || 'No se pudo escanear este par.');
+      }
+
+      const info = await convertInfoToMxn(data.ticket);
+      const ticket = buildTicket(info);
+      await storeTicketImages(ticket.id, { ticketImage: pair.ticketImage, voucherImage: pair.voucherImage });
+      tickets.unshift(ticket);
+      saveLocalTickets();
+      await saveToCloud({ upserts: [ticket] });
+      pair.status = 'guardado';
+      pair.ticketId = ticket.id;
+      saved += 1;
+    } catch (error) {
+      pair.status = 'error';
+      pair.error = error.message || 'Error';
+      failed += 1;
+    }
+
+    renderPairQueue();
+    renderAll();
+  }
+
+  pairRunning = false;
+  updateTicketActionButton();
+  renderPairQueue();
+  $('scan-result').innerHTML = `<div class="alert ${failed ? 'error' : 'ok'}">Pares terminados: ${saved} guardados, ${failed} con error.</div>`;
+  setStatus(`Pares terminados: ${saved} guardados, ${failed} con error`, Boolean(failed));
+}
+
+function removePair(pairId) {
+  pairQueue = pairQueue.filter((pair) => pair.id !== pairId);
+  if (!pairQueue.length) addPair();
+  else renderPairQueue();
+}
+
+function renderPairQueue() {
+  const list = $('pair-list');
+  list.innerHTML = pairQueue.map((pair, index) => {
+    const label = pairStatusLabel(pair);
+    return `
+      <div class="pair-item">
+        <div class="pair-head">
+          <strong>Par ${index + 1}</strong>
+          <button class="mini-btn danger" data-pair-remove="${pair.id}" type="button">Quitar</button>
+        </div>
+        <div class="pair-grid">
+          <label class="pair-picker">
+            <input data-pair-input="${pair.id}" data-kind="ticket" type="file" accept="image/*">
+            <span>Ticket</span>
+            <small>${escapeHtml(pair.ticketName || 'Seleccionar foto')}</small>
+          </label>
+          <label class="pair-picker">
+            <input data-pair-input="${pair.id}" data-kind="voucher" type="file" accept="image/*">
+            <span>Comprobante</span>
+            <small>${escapeHtml(pair.voucherName || 'Seleccionar foto')}</small>
+          </label>
+        </div>
+        <div class="pair-status ${label.className}" title="${escapeHtml(pair.error || label.text)}">${escapeHtml(label.text)}</div>
+      </div>
+    `;
+  }).join('');
+
+  list.querySelectorAll('input[data-pair-input]').forEach((input) => {
+    input.addEventListener('change', (event) => loadPairImage(event, input.dataset.pairInput, input.dataset.kind));
+  });
+  list.querySelectorAll('button[data-pair-remove]').forEach((button) => {
+    button.addEventListener('click', () => removePair(button.dataset.pairRemove));
+  });
+
+  $('pair-scan-btn').disabled = pairRunning || !pairQueue.some((pair) => pairReady(pair) && pair.status !== 'guardado');
+}
+
+function pairReady(pair) {
+  return Boolean(pair.ticketImage && pair.voucherImage);
+}
+
+function pairStatusLabel(pair) {
+  if (pair.status === 'comprimiendo') return { text: 'Comprimiendo', className: 'running' };
+  if (pair.status === 'analizando') return { text: 'Analizando', className: 'running' };
+  if (pair.status === 'guardado') return { text: 'Guardado', className: 'done' };
+  if (pair.status === 'error') return { text: pair.error || 'Error', className: 'error' };
+  if (!pair.ticketImage && !pair.voucherImage) return { text: 'Faltan ticket y comprobante', className: '' };
+  if (!pair.ticketImage) return { text: 'Falta ticket', className: '' };
+  if (!pair.voucherImage) return { text: 'Falta comprobante', className: '' };
+  return { text: 'Listo', className: 'done' };
 }
 
 function buildTicket(info) {
@@ -277,16 +466,9 @@ function clearTicketImage(clearResult = true) {
   $('ticket-preview').hidden = true;
   $('ticket-preview').removeAttribute('src');
   $('clear-ticket').hidden = true;
-  $('scan-btn').disabled = true;
+  resetBatchQueue();
+  updateTicketActionButton();
   if (clearResult) $('scan-result').innerHTML = '';
-}
-
-function clearVoucherImage() {
-  voucherImage = null;
-  $('voucher-input').value = '';
-  $('voucher-preview').hidden = true;
-  $('voucher-preview').removeAttribute('src');
-  $('clear-voucher').hidden = true;
 }
 
 function renderAll() {
@@ -376,6 +558,7 @@ async function loadFromCloud() {
       const merged = new Map(tickets.map((ticket) => [ticket.id, ticket]));
       data.tickets.forEach((ticket) => merged.set(ticket.id, ticket));
       tickets = [...merged.values()].sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
+      await ensureTicketsInMxn();
       saveLocalTickets();
       renderAll();
       setStatus('Sincronizado con Cloudflare');
@@ -448,6 +631,10 @@ function saveManualTicket() {
     subtotal: total,
     impuestos: 0,
     total,
+    total_ticket: total,
+    total_comprobante: 0,
+    propina: 0,
+    fuente_total: 'ticket',
     moneda: 'MXN',
     moneda_original: null,
     total_original: 0,
@@ -477,7 +664,7 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total', 'Moneda', 'Tarjeta', 'Notas'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas'],
     ...tickets.map((ticket) => [
       'GOS',
       ticket.info.fecha || '',
@@ -486,6 +673,11 @@ function exportCsv() {
       ticket.info.total || 0,
       ticket.info.moneda || 'MXN',
       ticket.info.tarjeta || '',
+      buildCodificacion(ticket.info),
+      ticket.info.total_ticket || '',
+      ticket.info.total_comprobante || '',
+      ticket.info.propina || '',
+      ticket.info.fuente_total || '',
       ticket.info.notas || ''
     ])
   ];
@@ -551,6 +743,105 @@ function loadLocalTickets() {
 
 function saveLocalTickets() {
   localStorage.setItem('tickets_v3', JSON.stringify(tickets));
+}
+
+async function ensureTicketsInMxn({ persist = false } = {}) {
+  let changed = false;
+
+  for (const ticket of tickets) {
+    try {
+      const before = JSON.stringify(ticket.info);
+      ticket.info = await convertInfoToMxn(ticket.info);
+      if (JSON.stringify(ticket.info) !== before) {
+        ticket.updatedAt = new Date().toISOString();
+        changed = true;
+      }
+    } catch (error) {
+      console.warn('No se pudo convertir ticket a MXN:', error);
+    }
+  }
+
+  if (changed) {
+    tickets = tickets.sort((a, b) => new Date(b.savedAt || 0) - new Date(a.savedAt || 0));
+    saveLocalTickets();
+    renderAll();
+    if (persist) saveToCloud({ upserts: tickets });
+  }
+}
+
+async function convertInfoToMxn(info) {
+  if (info.moneda === 'MXN') {
+    return { ...info, moneda: 'MXN' };
+  }
+
+  const sourceCurrency = getSourceCurrency(info);
+  if (sourceCurrency === 'MXN') {
+    return { ...info, moneda: 'MXN' };
+  }
+
+  const date = dateForFx(info.fecha);
+  const fx = await getHistoricalRate(sourceCurrency, date);
+  const originalTotal = numberOrZero(info.total_original) || numberOrZero(info.total);
+  const converted = {
+    ...info,
+    moneda: 'MXN',
+    moneda_original: info.moneda_original || sourceCurrency,
+    total_original: originalTotal,
+    total: roundMoney(originalTotal * fx.rate),
+    subtotal: roundMoney(numberOrZero(info.subtotal) * fx.rate),
+    impuestos: roundMoney(numberOrZero(info.impuestos) * fx.rate),
+    total_ticket: roundMoney(numberOrZero(info.total_ticket) * fx.rate),
+    total_comprobante: roundMoney(numberOrZero(info.total_comprobante) * fx.rate),
+    propina: roundMoney(numberOrZero(info.propina) * fx.rate),
+    tipo_cambio: fx.rate,
+    fecha_tipo_cambio: fx.date || date,
+    fuente_tipo_cambio: fx.source || 'frankfurter'
+  };
+
+  if (Array.isArray(info.items)) {
+    converted.items = info.items.map((item) => ({
+      ...item,
+      precio: roundMoney(numberOrZero(item.precio) * fx.rate)
+    }));
+  }
+
+  converted.notas = appendUniqueNote(
+    converted.notas,
+    `Convertido a MXN desde ${sourceCurrency} con TC ${fx.rate} (${converted.fecha_tipo_cambio})`
+  );
+
+  return converted;
+}
+
+function getSourceCurrency(info) {
+  if (info.moneda && info.moneda !== 'MXN') {
+    const currency = String(info.moneda).toUpperCase();
+    return /^[A-Z]{3}$/.test(currency) ? currency : 'MXN';
+  }
+  if (info.moneda_original && info.moneda_original !== 'MXN') {
+    const currency = String(info.moneda_original).toUpperCase();
+    return /^[A-Z]{3}$/.test(currency) ? currency : 'MXN';
+  }
+  return 'MXN';
+}
+
+async function getHistoricalRate(currency, date) {
+  const key = `${currency}:${date}`;
+  if (fxRateCache.has(key)) return fxRateCache.get(key);
+
+  const response = await fetch(`/fx/${currency}/${date}`);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data?.rate) {
+    throw new Error(`No se pudo convertir ${currency} a MXN para ${date}.`);
+  }
+
+  fxRateCache.set(key, data);
+  return data;
+}
+
+function appendUniqueNote(notes, note) {
+  if (notes && notes.includes(note)) return notes;
+  return notes ? `${notes} | ${note}` : note;
 }
 
 function openImageDb() {
@@ -619,7 +910,7 @@ function showAlert(message, isError) {
 }
 
 function formatCurrency(value) {
-  return money.format(Number(value || 0));
+  return `MXN$ ${numberOrZero(value).toFixed(2)}`;
 }
 
 function isoToDisplayDate(iso) {

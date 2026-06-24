@@ -39,7 +39,8 @@ main { max-width: 900px; margin: 0 auto; padding: 14px; }
 .view { display: none; }
 .view.active { display: block; }
 
-.scan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.capture-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.capture-grid.single { grid-template-columns: 1fr; }
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -50,6 +51,9 @@ main { max-width: 900px; margin: 0 auto; padding: 14px; }
 
 .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .panel h2 { margin: 0; font-size: 15px; }
+.field-head { display: flex; align-items: center; justify-content: space-between; }
+.field-title { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.flow-panel { margin-top: 12px; }
 .settings-panel { margin-bottom: 12px; }
 .settings-panel p { color: var(--muted); line-height: 1.45; }
 code { display: inline-block; padding: 2px 5px; border-radius: 5px; background: #eef1ec; color: #27302a; }
@@ -79,15 +83,6 @@ code { display: inline-block; padding: 2px 5px; border-radius: 5px; background: 
   background: #fff;
 }
 
-.batch-block {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-.batch-block h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
 .multi-picker {
   display: block;
   border: 1.5px solid var(--line);
@@ -133,6 +128,60 @@ code { display: inline-block; padding: 2px 5px; border-radius: 5px; background: 
 .batch-status.done { color: var(--ok); }
 .batch-status.error { color: var(--danger); }
 .batch-status.running { color: var(--accent); }
+
+.pair-list {
+  display: grid;
+  gap: 10px;
+}
+.pair-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: #fbfcfa;
+}
+.pair-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.pair-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pair-picker {
+  display: block;
+  border: 1.5px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  cursor: pointer;
+  background: white;
+}
+.pair-picker input { display: none; }
+.pair-picker span {
+  display: block;
+  color: var(--text);
+  font-weight: 750;
+}
+.pair-picker small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-status {
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 650;
+}
+.pair-status.done { color: var(--ok); }
+.pair-status.error { color: var(--danger); }
+.pair-status.running { color: var(--accent); }
 
 button {
   font: inherit;
@@ -252,6 +301,6 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
 
 @media (max-width: 620px) {
   main { padding: 12px; }
-  .scan-grid { grid-template-columns: 1fr; }
+  .capture-grid, .pair-grid { grid-template-columns: 1fr; }
   .dropzone { min-height: 132px; }
 }

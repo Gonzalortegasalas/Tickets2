@@ -15,47 +15,36 @@
 
   <main>
     <section id="view-scan" class="view active">
-      <div class="scan-grid">
-        <article class="panel">
-          <div class="panel-head">
-            <h2>Ticket</h2>
-            <button id="clear-ticket" class="icon-btn" type="button" title="Quitar ticket" hidden>×</button>
-          </div>
-          <label class="dropzone">
-            <input id="ticket-input" type="file" accept="image/*" capture="environment">
-            <span class="drop-icon">⌁</span>
-            <span>Tomar foto</span>
-            <small>Ticket completo y legible</small>
-          </label>
-          <img id="ticket-preview" class="preview" alt="Vista previa del ticket" hidden>
-          <div class="batch-block">
-            <h3>Seleccionar varios tickets</h3>
-            <label class="multi-picker">
-              <input id="batch-input" type="file" accept="image/*" multiple>
-              <span>Elegir varias fotos</span>
-              <small>Se analizan una por una para evitar errores</small>
+      <article class="panel">
+        <div class="panel-head">
+          <h2>Escanea uno o más tickets</h2>
+          <button id="clear-ticket" class="icon-btn" type="button" title="Quitar selección" hidden>×</button>
+        </div>
+        <div class="capture-grid single">
+          <div>
+            <h3 class="field-title">Ticket</h3>
+            <label class="dropzone">
+              <input id="ticket-input" type="file" accept="image/*" multiple>
+              <span class="drop-icon">⌁</span>
+              <span>Elegir foto(s)</span>
+              <small>Un ticket o varios tickets sin comprobante</small>
             </label>
+            <img id="ticket-preview" class="preview" alt="Vista previa del ticket" hidden>
           </div>
-        </article>
+        </div>
+        <button id="scan-btn" class="primary-btn" type="button" disabled>Analizar un ticket</button>
+        <div id="batch-list" class="batch-list" hidden></div>
+      </article>
 
-        <article class="panel">
-          <div class="panel-head">
-            <h2>Comprobante</h2>
-            <button id="clear-voucher" class="icon-btn" type="button" title="Quitar comprobante" hidden>×</button>
-          </div>
-          <label class="dropzone">
-            <input id="voucher-input" type="file" accept="image/*" capture="environment">
-            <span class="drop-icon">▣</span>
-            <span>Opcional</span>
-            <small>Terminal bancaria o propina</small>
-          </label>
-          <img id="voucher-preview" class="preview" alt="Vista previa del comprobante" hidden>
-        </article>
-      </div>
+      <article class="panel flow-panel">
+        <div class="panel-head">
+          <h2>Analizar varios tickets con comprobantes</h2>
+        </div>
+        <div id="pair-list" class="pair-list"></div>
+        <button id="add-pair-btn" class="secondary-btn" type="button">Agregar par</button>
+        <button id="pair-scan-btn" class="primary-btn" type="button" disabled>Analizar pares</button>
+      </article>
 
-      <button id="scan-btn" class="primary-btn" type="button" disabled>Analizar con OpenAI</button>
-      <button id="batch-scan-btn" class="secondary-btn" type="button" disabled>Analizar varios tickets</button>
-      <div id="batch-list" class="batch-list" hidden></div>
       <button id="manual-btn" class="secondary-btn" type="button">Registrar manualmente</button>
       <div id="scan-result"></div>
     </section>

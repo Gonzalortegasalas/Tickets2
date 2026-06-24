@@ -24,6 +24,10 @@ const RECEIPT_SCHEMA = {
     subtotal: { type: 'number' },
     impuestos: { type: 'number' },
     total: { type: 'number' },
+    total_ticket: { type: 'number' },
+    total_comprobante: { type: 'number' },
+    propina: { type: 'number' },
+    fuente_total: { type: 'string', enum: ['ticket', 'comprobante', 'estimado'] },
     moneda: { type: 'string', enum: ['MXN', 'USD', 'EUR', 'GBP', 'CAD', 'Otro'] },
     moneda_original: { type: ['string', 'null'] },
     total_original: { type: 'number' },
@@ -41,6 +45,10 @@ const RECEIPT_SCHEMA = {
     'subtotal',
     'impuestos',
     'total',
+    'total_ticket',
+    'total_comprobante',
+    'propina',
+    'fuente_total',
     'moneda',
     'moneda_original',
     'total_original',
@@ -130,6 +138,11 @@ function extractOutputText(data) {
 }
 
 function normalizeTicket(ticket) {
+  const totalTicket = numberOrZero(ticket.total_ticket);
+  const totalComprobante = numberOrZero(ticket.total_comprobante);
+  const totalDetected = numberOrZero(ticket.total);
+  const finalTotal = Math.max(totalDetected, totalTicket, totalComprobante);
+
   const normalized = {
     tienda: ticket.tienda || null,
     fecha: ticket.fecha || null,
@@ -138,7 +151,11 @@ function normalizeTicket(ticket) {
     items: Array.isArray(ticket.items) ? ticket.items : [],
     subtotal: numberOrZero(ticket.subtotal),
     impuestos: numberOrZero(ticket.impuestos),
-    total: numberOrZero(ticket.total),
+    total: finalTotal,
+    total_ticket: totalTicket,
+    total_comprobante: totalComprobante,
+    propina: numberOrZero(ticket.propina),
+    fuente_total: ticket.fuente_total || (totalComprobante && totalComprobante >= totalTicket ? 'comprobante' : 'ticket'),
     moneda: ticket.moneda || 'MXN',
     moneda_original: ticket.moneda_original || null,
     total_original: numberOrZero(ticket.total_original),
@@ -182,6 +199,9 @@ Rules:
 - Match each item with the price on the same horizontal line.
 - Prefer the final charged amount. ${hasVoucher ? 'There is a second image with the card voucher; use its TOTAL as the final total when readable, and use the receipt for store/items/date.' : 'Use the receipt TOTAL as the final total.'}
 - If a voucher shows CONSUMO/PROPINA/TOTAL, total must be the voucher TOTAL.
+- When both receipt and voucher are present, extract total_ticket from the receipt and total_comprobante from the voucher. Set total to the highest reliable final charged amount, usually total_comprobante when it includes tip.
+- Set propina to total_comprobante - total_ticket when that difference is visible/reasonable, otherwise 0.
+- Set fuente_total to "comprobante" when the voucher amount was used, "ticket" when the receipt amount was used, or "estimado" only when uncertain.
 - Extract only the last 4 digits for tarjeta if visible.
 - Currency detection matters: use MXN only when the receipt is Mexican pesos; detect USD/EUR when printed.
 - If uncertain, keep the best value and explain briefly in notas.
