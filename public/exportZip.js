@@ -13,9 +13,13 @@ import {
 export async function exportWeeklyZip(tickets, getTicketImages) {
   if (!tickets.length) throw new Error('No hay tickets para exportar.');
 
-  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js');
-  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+    () => typeof window.JSZip === 'function');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
+    () => typeof window.jspdf?.jsPDF === 'function');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    () => ['book_new', 'aoa_to_sheet', 'book_append_sheet'].every((key) =>
+      typeof window.XLSX?.utils?.[key] === 'function') && typeof window.XLSX?.write === 'function');
 
   const exportTickets = await prepareTicketsForMxnExport(tickets);
   const zip = new window.JSZip();
@@ -29,7 +33,12 @@ export async function exportWeeklyZip(tickets, getTicketImages) {
       const codificacion = buildCodificacion(ticket.exportInfo);
       const folderName = uniqueFolderName(sanitizeFolderName(codificacion), usedFolderNames);
       const ticketFolder = weekZip.folder(folderName);
-      const images = await getTicketImages(ticket.id);
+      let images = null;
+      try {
+        images = await getTicketImages(ticket.id);
+      } catch (error) {
+        console.warn(`No se pudieron leer las imágenes del ticket ${ticket.id}:`, error);
+      }
       const pdfBlob = await buildTicketPdf(ticket.exportInfo, images);
       ticketFolder.file('ticket.pdf', pdfBlob);
     }
@@ -61,7 +70,7 @@ async function prepareTicketsForMxnExport(tickets) {
 
     if (sourceCurrency === 'MXN') {
       exportInfo.moneda = 'MXN';
-      exportInfo.total = roundMoney(numberOrZero(ticket.info.total || sourceAmount));
+      exportInfo.total = roundMoney(numberOrZero(ticket.info.total));
       exportInfo.moneda_original = ticket.info.moneda_original || null;
       exportInfo.total_original = numberOrZero(ticket.info.total_original || 0);
       return { ...ticket, exportInfo };
@@ -71,13 +80,23 @@ async function prepareTicketsForMxnExport(tickets) {
     const cacheKey = `${sourceCurrency}:${date}`;
     let fx = rateCache.get(cacheKey);
     if (!fx) {
-      fx = await fetchHistoricalRate(sourceCurrency, date);
+      fx = fetchHistoricalRate(sourceCurrency, date);
       rateCache.set(cacheKey, fx);
     }
+    fx = await fx;
 
     const totalMxn = roundMoney(sourceAmount * fx.rate);
     exportInfo.moneda = 'MXN';
     exportInfo.total = totalMxn;
+    for (const field of ['subtotal', 'impuestos', 'total_ticket', 'total_comprobante', 'propina']) {
+      exportInfo[field] = roundMoney(numberOrZero(ticket.info[field]) * fx.rate);
+    }
+    if (Array.isArray(ticket.info.items)) {
+      exportInfo.items = ticket.info.items.map((item) => ({
+        ...item,
+        precio: roundMoney(numberOrZero(item.precio) * fx.rate)
+      }));
+    }
     exportInfo.moneda_original = sourceCurrency;
     exportInfo.total_original = sourceAmount;
     exportInfo.tipo_cambio = fx.rate;
@@ -163,6 +182,10 @@ async function buildTicketPdf(info, images) {
   ];
 
   for (const [label, value] of lines) {
+    if (y > 280) {
+      doc.addPage();
+      y = 16;
+    }
     doc.setFont('helvetica', 'bold');
     doc.text(`${label}:`, 10, y);
     doc.setFont('helvetica', 'normal');
@@ -171,6 +194,10 @@ async function buildTicketPdf(info, images) {
   }
 
   if (Array.isArray(info.items) && info.items.length) {
+    if (y > 270) {
+      doc.addPage();
+      y = 16;
+    }
     y += 2;
     doc.setFont('helvetica', 'bold');
     doc.text('Productos', 10, y);
@@ -191,6 +218,16 @@ async function buildTicketPdf(info, images) {
 }
 
 function addImage(doc, dataUrl, x, y, maxWidth, maxHeight) {
+  try {
+    return drawImage(doc, dataUrl, x, y, maxWidth, maxHeight);
+  } catch (error) {
+    console.warn('No se pudo incluir una imagen en el PDF:', error);
+    doc.text('No se pudo cargar la imagen local.', x, y);
+    return y + 8;
+  }
+}
+
+function drawImage(doc, dataUrl, x, y, maxWidth, maxHeight) {
   const props = doc.getImageProperties(dataUrl);
   const ratio = Math.min(maxWidth / props.width, maxHeight / props.height);
   const drawWidth = props.width * ratio;
@@ -271,7 +308,10 @@ function imageType(dataUrl) {
 }
 
 function getOriginalCurrency(info) {
-  const currency = String(info.moneda_original || info.moneda || 'MXN').toUpperCase();
+  // moneda describes the stored amounts; moneda_original may only be metadata.
+  const storedCurrency = String(info.moneda || '').trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(storedCurrency)) return storedCurrency;
+  const currency = String(info.moneda_original || 'MXN').trim().toUpperCase();
   return /^[A-Z]{3}$/.test(currency) ? currency : 'MXN';
 }
 
@@ -295,15 +335,46 @@ function appendNote(notes, note) {
   return notes ? `${notes} | ${note}` : note;
 }
 
-function loadScript(src) {
-  if ([...document.scripts].some((script) => script.src === src)) return Promise.resolve();
-  return new Promise((resolve, reject) => {
+const scriptLoads = new Map();
+
+function loadScript(src, isAvailable) {
+  if (isAvailable()) return Promise.resolve();
+  if (scriptLoads.has(src)) return scriptLoads.get(src);
+
+  // An old tag does not prove that its library loaded successfully.
+  for (const script of [...document.scripts]) {
+    if (script.src === src) script.remove();
+  }
+  const loading = new Promise((resolve, reject) => {
     const script = document.createElement('script');
+    const timeout = setTimeout(() => fail(), 30000);
+    const cleanup = () => {
+      clearTimeout(timeout);
+      script.onload = null;
+      script.onerror = null;
+    };
+    const fail = () => {
+      cleanup();
+      script.remove();
+      reject(new Error(`No se pudo cargar ${src}`));
+    };
     script.src = src;
-    script.onload = resolve;
-    script.onerror = () => reject(new Error(`No se pudo cargar ${src}`));
-    document.head.appendChild(script);
+    script.onload = () => {
+      if (!isAvailable()) return fail();
+      cleanup();
+      resolve();
+    };
+    script.onerror = fail;
+    try {
+      document.head.appendChild(script);
+    } catch {
+      fail();
+    }
+  }).finally(() => {
+    scriptLoads.delete(src);
   });
+  scriptLoads.set(src, loading);
+  return loading;
 }
 
 function downloadBlob(blob, filename) {
@@ -313,5 +384,6 @@ function downloadBlob(blob, filename) {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(link.href);
+  // Give the browser time to start consuming the download before releasing it.
+  setTimeout(() => URL.revokeObjectURL(link.href), 60000);
 }
