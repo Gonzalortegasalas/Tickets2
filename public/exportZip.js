@@ -73,7 +73,7 @@ async function prepareTicketsForMxnExport(tickets) {
   return Promise.all(tickets.map(async (ticket) => {
     const exportInfo = { ...ticket.info };
     if (exportInfo.tipo === 'millas') {
-      const values = calculateMileage(exportInfo.kilometros);
+      const values = calculateMileage(exportInfo.kilometros, exportInfo.ida_vuelta === true);
       Object.assign(exportInfo, { total: values.total, millas: values.miles, tarifa_milla: values.rate, moneda: 'MXN' });
       return { ...ticket, exportInfo };
     }
@@ -196,8 +196,10 @@ function buildWorkbook(tickets) {
     'Tipo de cambio',
     'Fecha tipo de cambio',
     'Kilometros',
-    'Millas (km / 1.609344)',
-    'Tarifa MXN por milla'
+    'Millas (km / 1.609344 × factor)',
+    'Tarifa MXN por milla',
+    'Tipo de trayecto',
+    'Factor recorrido'
   ]];
 
   for (const ticket of tickets) {
@@ -220,7 +222,9 @@ function buildWorkbook(tickets) {
       info.fecha_tipo_cambio || '',
       info.tipo === 'millas' ? info.kilometros : '',
       info.tipo === 'millas' ? info.millas : '',
-      info.tipo === 'millas' ? info.tarifa_milla : ''
+      info.tipo === 'millas' ? info.tarifa_milla : '',
+      info.tipo === 'millas' ? (info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida') : '',
+      info.tipo === 'millas' ? (info.ida_vuelta === true ? 2 : 1) : ''
     ]);
   }
 
@@ -228,7 +232,7 @@ function buildWorkbook(tickets) {
   tickets.forEach((ticket, index) => {
     if (ticket.exportInfo.tipo !== 'millas') return;
     const row = index + 2;
-    ws[`Q${row}`] = { t: 'n', f: `P${row}/1.609344`, v: ticket.exportInfo.millas, z: '0.0000' };
+    ws[`Q${row}`] = { t: 'n', f: `P${row}/1.609344${ticket.exportInfo.ida_vuelta === true ? `*T${row}` : ''}`, v: ticket.exportInfo.millas, z: '0.0000' };
     ws[`E${row}`] = { t: 'n', f: `ROUND(Q${row}*R${row},2)`, v: ticket.exportInfo.total, z: '0.00' };
   });
   ws['!cols'] = [
@@ -248,8 +252,10 @@ function buildWorkbook(tickets) {
     { wch: 14 },
     { wch: 18 },
     { wch: 14 },
-    { wch: 24 },
-    { wch: 22 }
+    { wch: 32 },
+    { wch: 22 },
+    { wch: 18 },
+    { wch: 18 }
   ];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
   return wb;

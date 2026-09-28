@@ -13,6 +13,7 @@ let ticketImage = null;
 let mileageImage = null;
 let mileageEditingId = null;
 let mileageBusy = false;
+let mileageRoundTrip = false;
 let batchQueue = [];
 let batchRunning = false;
 let currentPair = null;
@@ -32,6 +33,8 @@ function init() {
   $('mileage-image').addEventListener('change', loadMileageImage);
   $('mileage-analyze').addEventListener('click', analyzeMileageImage);
   $('mileage-km').addEventListener('input', updateMileageCalculation);
+  $('mileage-one-way').addEventListener('click', () => selectMileageTrip(false));
+  $('mileage-round-trip').addEventListener('click', () => selectMileageTrip(true));
   $('mileage-form').addEventListener('submit', saveMileage);
   $('mileage-cancel').addEventListener('click', () => { if (!mileageBusy) $('mileage-dialog').close(); });
   $('mileage-dialog').addEventListener('cancel', (event) => { if (mileageBusy) event.preventDefault(); });
@@ -895,6 +898,9 @@ async function openMileageDialog(id = null) {
   $('mileage-analyze').disabled = true;
   $('mileage-message').textContent = '';
   const ticket = tickets.find((item) => item.id === id);
+  const today = new Date();
+  $('mileage-date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  selectMileageTrip(ticket?.info.ida_vuelta === true);
   if (ticket) {
     $('mileage-route').value = ticket.info.tienda || '';
     $('mileage-date').value = dateForFx(ticket.info.fecha);
@@ -921,25 +927,29 @@ async function openMileageDialog(id = null) {
 
 function setMileageBusy(busy) {
   mileageBusy = busy;
-  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel'].forEach((id) => { $(id).disabled = busy; });
+  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
   $('mileage-analyze').disabled = busy || !mileageImage;
 }
 
 async function loadMileageImage(event) {
+  if (mileageBusy) return;
   const file = event.target.files?.[0];
   if (!file) return;
   setMileageBusy(true);
   mileageImage = null;
+  $('mileage-km').value = '';
+  $('mileage-route').value = '';
+  updateMileageCalculation();
   $('mileage-preview').hidden = true;
   $('mileage-message').textContent = 'Preparando captura...';
   try {
     mileageImage = await compressImage(file, 1800, 0.9);
     $('mileage-preview').src = mileageImage;
     $('mileage-preview').hidden = false;
-    $('mileage-message').textContent = 'Foto lista. Lee los kilómetros o escríbelos manualmente.';
   } catch (error) {
     $('mileage-message').textContent = error.message;
   } finally { setMileageBusy(false); }
+  if (mileageImage) await analyzeMileageImage();
 }
 
 async function analyzeMileageImage() {
@@ -952,21 +962,33 @@ async function analyzeMileageImage() {
       body: JSON.stringify({ routeImage: mileageImage })
     });
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data?.error?.message || 'No se pudo leer la captura.');
+    if (!response.ok || !data.ok || !data.route) throw new Error(data?.error?.message || 'No se pudo leer la captura.');
     $('mileage-km').value = data.route.kilometros ?? '';
+    if (typeof data.route.kilometros !== 'number' || !Number.isFinite(data.route.kilometros) || data.route.kilometros <= 0) {
+      throw new Error('No se pudo identificar una distancia clara.');
+    }
     if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
     if (/^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
     $('mileage-message').textContent = [data.route.notas, 'Revisa los kilómetros y la fecha antes de guardar.'].filter(Boolean).join(' ');
     updateMileageCalculation();
+    if (!mileageEditingId) await persistMileage();
   } catch (error) {
     $('mileage-message').textContent = `${error.message} Puedes ingresar los kilómetros manualmente.`;
   } finally { setMileageBusy(false); }
 }
 
+function selectMileageTrip(roundTrip) {
+  if (mileageBusy) return;
+  mileageRoundTrip = roundTrip;
+  $('mileage-one-way').setAttribute('aria-pressed', String(!roundTrip));
+  $('mileage-round-trip').setAttribute('aria-pressed', String(roundTrip));
+  updateMileageCalculation();
+}
+
 function updateMileageCalculation() {
   try {
-    const values = calculateMileage(parseMoneyInput($('mileage-km').value));
-    $('mileage-calculation').textContent = `${values.km} km ÷ 1.609344 = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
+    const values = calculateMileage(parseMoneyInput($('mileage-km').value), mileageRoundTrip);
+    $('mileage-calculation').textContent = `${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'}: ${values.km} km ÷ 1.609344${mileageRoundTrip ? ' × 2' : ''} = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
   } catch {
     $('mileage-calculation').textContent = '1 milla = 1.609344 km · $10 MXN por milla';
   }
@@ -977,21 +999,27 @@ async function saveMileage(event) {
   if (mileageBusy) return;
   setMileageBusy(true);
   try {
-    if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
-    const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value });
-    const previous = tickets.find((item) => item.id === mileageEditingId);
-    const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
-    await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
-    if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
-    else tickets.unshift(ticket);
-    saveLocalTickets();
-    await saveToCloud({ upserts: [ticket] });
-    renderAll();
-    $('mileage-dialog').close();
-    setStatus('Trayecto guardado como MILLAS');
+    await persistMileage();
   } catch (error) {
     $('mileage-message').textContent = error.message || 'No se pudo guardar el trayecto.';
   } finally { setMileageBusy(false); }
+}
+
+async function persistMileage() {
+  if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
+  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, roundTrip: mileageRoundTrip });
+  const previous = tickets.find((item) => item.id === mileageEditingId);
+  const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
+  await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
+  const previousTickets = tickets.slice();
+  if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
+  else tickets.unshift(ticket);
+  try { saveLocalTickets(); } catch (error) { tickets = previousTickets; throw error; }
+  mileageEditingId = ticket.id;
+  await saveToCloud({ upserts: [ticket] });
+  renderAll();
+  $('mileage-dialog').close();
+  setStatus(`Trayecto guardado como MILLAS · ${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'} · ${formatCurrency(info.total)}`);
 }
 
 function renderMileageCard(ticket) {
@@ -999,7 +1027,7 @@ function renderMileageCard(ticket) {
   return `<article class="ticket-card">
     <div class="ticket-row"><div><h3 class="ticket-title">${escapeHtml(info.tienda)}</h3>
       <p class="ticket-meta">MILLAS · ${escapeHtml(info.fecha)}</p>
-      <p class="ticket-meta">${numberOrZero(info.kilometros)} km → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
+      <p class="ticket-meta">${info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida'} · ${numberOrZero(info.kilometros)} km${info.ida_vuelta === true ? ' × 2' : ''} → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
     </div><div class="ticket-total">${formatCurrency(info.total)}</div></div>
     <div class="ticket-actions">
       <button class="mini-btn" data-action="mileage-edit" data-id="${ticket.id}" type="button">Editar trayecto</button>
@@ -1065,7 +1093,7 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla', 'Tipo de trayecto', 'Factor recorrido'],
     ...tickets.map((ticket) => [
       'GOS',
       ticket.info.fecha || '',
@@ -1082,7 +1110,9 @@ function exportCsv() {
       ticket.info.notas || '',
       ticket.info.kilometros || '',
       ticket.info.millas || '',
-      ticket.info.tarifa_milla || ''
+      ticket.info.tarifa_milla || '',
+      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida') : '',
+      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 2 : 1) : ''
     ])
   ];
   downloadBlob(toCsv(rows), 'tickets.csv', 'text/csv;charset=utf-8');

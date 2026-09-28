@@ -207,6 +207,9 @@ button {
 .secondary-btn { background: white; color: var(--accent); border: 1.5px solid var(--accent); }
 .mileage-btn { background: var(--ok); border-color: var(--ok); color: white; }
 .mileage-btn:hover { background: #1b6030; border-color: #1b6030; }
+.mileage-trip-options { display: flex; gap: 8px; }
+.mileage-trip-options button { flex: 1; margin-top: 0; }
+.mileage-trip-options [aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: white; }
 .danger-btn { background: #fff2f1; color: var(--danger); border: 1.5px solid var(--danger); }
 .compact { width: auto; padding: 0 14px; margin-top: 0; }
 .icon-btn {
