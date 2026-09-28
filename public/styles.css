@@ -210,6 +210,11 @@ button {
 .mileage-trip-options { display: flex; gap: 8px; }
 .mileage-trip-options button { flex: 1; margin-top: 0; }
 .mileage-trip-options [aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: white; }
+.mileage-dropzone { margin-top: 10px; }
+.mileage-dropzone .drop-icon { color: var(--ok); }
+.mileage-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.mileage-hint:empty { display: none; }
+#mileage-panel { scroll-margin-top: 90px; }
 .danger-btn { background: #fff2f1; color: var(--danger); border: 1.5px solid var(--danger); }
 .compact { width: auto; padding: 0 14px; margin-top: 0; }
 .icon-btn {
