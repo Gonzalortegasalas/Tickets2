@@ -20,9 +20,19 @@ test('kilometers convert without rounding miles before the payment', () => {
 test('mileage records survive KV round trips with their typed metadata', async () => {
   const records = new Map();
   const kv = { get: async (key) => records.get(key), put: async (key, value) => records.set(key, value) };
-  const ticket = { id: 'route', info: buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Origen → destino' }) };
+  const ticket = { id: 'route', info: buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Origen → destino', roundTrip: true }) };
   await saveTicketsPatch(kv, { upserts: [ticket], deletes: [] });
   assert.deepEqual(await loadTickets(kv), [ticket]);
+});
+
+test('round trip doubles unrounded miles and pays both legs without doubling stored kilometers', () => {
+  const info = buildMileageInfo({ km: 100, date: '2026-09-28', roundTrip: true });
+  assert.equal(info.kilometros, 100);
+  assert.equal(info.millas, calculateMileage(100).miles * 2);
+  assert.equal(info.total, 1242.74);
+  assert.equal(info.ida_vuelta, true);
+  assert.equal(calculateMileage(1.609344, true).total, 20);
+  assert.equal(buildMileageInfo({ km: 100, date: '2026-09-28' }).ida_vuelta, false);
 });
 
 test('route scanning uses its own schema and endpoint, preserving receipt scanning', async (t) => {

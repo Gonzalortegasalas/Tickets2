@@ -210,3 +210,19 @@ test('missing route evidence warns without creating a blank PDF or losing Excel 
   assert.ok(state.files.has('avisos.txt'));
   assert.equal(state.rows.length, 2);
 });
+
+test('round-trip Excel labels and formulas apply the factor once; legacy trips remain one-way', async (t) => {
+  const state = setup(t);
+  const info = buildMileageInfo({ km: 100, date: '2026-09-22', roundTrip: true });
+  const legacy = buildMileageInfo({ km: 100, date: '2026-09-22' });
+  delete legacy.ida_vuelta;
+  await exportWeeklyZip([ticket('round', info), ticket('legacy', legacy)], async () => ({ ticketImage: 'data:image/png;base64,valid' }));
+  assert.equal(state.rows[1][18], 'Ida y vuelta');
+  assert.equal(state.rows[1][19], 2);
+  assert.equal(state.rows[1][15], 100);
+  assert.equal(state.sheet.Q2.f, 'P2/1.609344*T2');
+  assert.equal(state.sheet.E2.v, 1242.74);
+  assert.equal(state.rows[2][18], 'Solo ida');
+  assert.equal(state.sheet.E3.v, 621.37);
+  assert.equal(state.pdfs[0].texts.length, 0);
+});
