@@ -80,8 +80,10 @@ Usa un modelo mini para mantener costo bajo. Si necesitas más precisión en tic
 - Si la foto no se puede leer, se conserva para reintentar o reemplazarla por una captura más clara. **Editar trayecto** permite cambiar fecha y solo ida/ida y vuelta con **Guardar cambios**, incluso si la foto no está en ese dispositivo; no elimina la evidencia almacenada. También se puede sustituir la foto para volver a analizarla, conservando la fecha del registro.
 - Se calcula `millas = km / 1.609344 × factor` y `pago MXN = redondear(millas × 10, 2)`, sin redondear primero la distancia. El factor es 1 para solo ida y 2 para ida y vuelta; los kilómetros de la captura se conservan sin duplicar. Los registros anteriores siguen siendo de solo ida.
 - Los trayectos se guardan junto con los tickets y tienen filtro **MILLAS** y edición propia.
+- Se extrae la **dirección del destino** cuando es legible en la captura y se muestra en el registro. No se completan datos ausentes ni se confunde con el origen o las calles del mapa. Si no aparece, queda vacía y se puede guardar la distancia. Cambiar la fecha o el tipo de recorrido conserva la dirección; reemplazar la captura la vuelve a leer.
 - Excel conserva sus columnas existentes y agrega el tipo de trayecto y factor del recorrido a kilómetros, millas y tarifa; la cuenta y la codificación usan **MILLAS**. Las celdas de millas e importe incluyen fórmulas y valores calculados. El CSV también indica el tipo y factor.
 - El PDF de un trayecto contiene únicamente la captura. Si falta la foto, el ZIP conserva el registro en Excel y avisa en pantalla y en `avisos.txt`; no genera un PDF vacío.
+- Excel y CSV agregan al final la columna **Direccion del destino**, conservando las posiciones de las columnas y las fórmulas existentes.
 - Las fotos siguen siendo locales: exporta desde el mismo dispositivo y navegador donde las guardaste.
 - Validación: `npm test` y `npm run check`.
 
