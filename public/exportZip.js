@@ -41,9 +41,11 @@ export async function exportWeeklyZip(tickets, getTicketImages) {
       } catch (error) {
         console.warn(`No se pudieron leer las imágenes del ticket ${ticket.id}:`, error);
       }
-      const pdfBlob = await buildTicketPdf(ticket.exportInfo, images);
+      const { blob: pdfBlob, missingImages } = await buildTicketPdf(ticket.exportInfo, images);
       if (pdfBlob) ticketFolder.file('ticket.pdf', pdfBlob);
-      else warnings.push(`MILLAS: falta una captura legible para ${ticket.exportInfo.tienda || ticket.id}. Exporta desde el dispositivo donde guardaste la foto o adjúntala de nuevo.`);
+      if (missingImages.length) {
+        warnings.push(`${codificacion}: falta una imagen legible de ${missingImages.join(' y ')}. Exporta desde el dispositivo donde guardaste las fotos o adjúntalas de nuevo.`);
+      }
     }
   }
 
@@ -138,116 +140,30 @@ function groupTicketsByWeek(tickets) {
 async function buildTicketPdf(info, images) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const width = doc.internal.pageSize.width;
-  if (info.tipo === 'millas') {
-    // Never emit a blank PDF or add receipt text in place of route evidence.
-    if (!images?.ticketImage) return null;
-    if (images?.ticketImage) {
-      try {
-        drawImage(doc, images.ticketImage, 10, 10, width - 20, 277);
-      } catch (error) {
-        console.warn('No se pudo incluir la captura del trayecto:', error);
-        return null;
-      }
+  const { width, height } = doc.internal.pageSize;
+  const photos = [[info.tipo === 'millas' ? 'trayecto' : 'ticket', images?.ticketImage]];
+  if (info.tipo !== 'millas' && images?.voucherImage) photos.push(['comprobante', images.voucherImage]);
+  const missingImages = [];
+  let imageCount = 0;
+
+  for (const [label, image] of photos) {
+    if (!image) {
+      missingImages.push(label);
+      continue;
     }
-    return doc.output('blob');
-  }
-  let y = 16;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text(info.tienda || 'Ticket', width / 2, y, { align: 'center' });
-  y += 8;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(`${info.fecha || 'Sin fecha'} ${info.hora || ''} · ${info.categoria || 'Otro'}`, width / 2, y, { align: 'center' });
-  y += 8;
-
-  if (images?.ticketImage) {
-    y = addImage(doc, images.ticketImage, 10, y, width - 20, 125) + 8;
-  } else {
-    doc.setTextColor(110, 117, 111);
-    doc.text('Sin imagen local guardada para este ticket.', 10, y);
-    doc.setTextColor(0, 0, 0);
-    y += 8;
-  }
-
-  if (images?.voucherImage) {
-    doc.setFont('helvetica', 'bold');
-    doc.text('Comprobante', 10, y);
-    y += 5;
-    y = addImage(doc, images.voucherImage, 10, y, width - 20, 70) + 8;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text('Resumen', 10, y);
-  y += 7;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-
-  const lines = [
-    ['Colaborador', 'GOS'],
-    ['Total', `MXN$ ${numberOrZero(info.total).toFixed(2)}`],
-    ...(numberOrZero(info.total_ticket) || numberOrZero(info.total_comprobante) ? [
-      ['Total ticket', `MXN$ ${numberOrZero(info.total_ticket).toFixed(2)}`],
-      ['Total comprobante', `MXN$ ${numberOrZero(info.total_comprobante).toFixed(2)}`],
-      ['Propina', `MXN$ ${numberOrZero(info.propina).toFixed(2)}`],
-      ['Fuente total', info.fuente_total || 'ticket']
-    ] : []),
-    ...(info.moneda_original ? [
-      ['Original', `${info.moneda_original} ${numberOrZero(info.total_original).toFixed(2)}`],
-      ['Tipo de cambio', `${info.tipo_cambio || ''} (${info.fecha_tipo_cambio || ''})`]
-    ] : []),
-    ['Cuenta', getCuenta(info)],
-    ['Codificacion', buildCodificacion(info)]
-  ];
-
-  for (const [label, value] of lines) {
-    if (y > 280) {
-      doc.addPage();
-      y = 16;
-    }
-    doc.setFont('helvetica', 'bold');
-    doc.text(`${label}:`, 10, y);
-    doc.setFont('helvetica', 'normal');
-    doc.text(String(value || ''), 42, y, { maxWidth: width - 52 });
-    y += 6;
-  }
-
-  if (Array.isArray(info.items) && info.items.length) {
-    if (y > 270) {
-      doc.addPage();
-      y = 16;
-    }
-    y += 2;
-    doc.setFont('helvetica', 'bold');
-    doc.text('Productos', 10, y);
-    y += 6;
-    doc.setFont('helvetica', 'normal');
-    for (const item of info.items.slice(0, 25)) {
-      if (y > 280) {
-        doc.addPage();
-        y = 16;
-      }
-      doc.text(String(item.nombre || 'Producto'), 10, y, { maxWidth: width - 45 });
-      doc.text(`$${numberOrZero(item.precio).toFixed(2)}`, width - 10, y, { align: 'right' });
-      y += 5;
+    if (imageCount) doc.addPage();
+    try {
+      drawImage(doc, image, 10, 10, width - 20, height - 20);
+      imageCount++;
+    } catch (error) {
+      // Keep valid evidence without leaving an empty page or adding PDF text.
+      if (imageCount) doc.deletePage(imageCount + 1);
+      missingImages.push(label);
+      console.warn('No se pudo incluir una imagen en el PDF:', error);
     }
   }
 
-  return doc.output('blob');
-}
-
-function addImage(doc, dataUrl, x, y, maxWidth, maxHeight) {
-  try {
-    return drawImage(doc, dataUrl, x, y, maxWidth, maxHeight);
-  } catch (error) {
-    console.warn('No se pudo incluir una imagen en el PDF:', error);
-    doc.text('No se pudo cargar la imagen local.', x, y);
-    return y + 8;
-  }
+  return { blob: imageCount ? doc.output('blob') : null, missingImages };
 }
 
 function drawImage(doc, dataUrl, x, y, maxWidth, maxHeight) {

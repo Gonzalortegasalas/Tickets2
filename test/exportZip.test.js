@@ -16,17 +16,18 @@ function setup(t) {
     async generateAsync() { return new Blob(['zip']); }
   }
   class Pdf {
-    constructor() { this.internal = { pageSize: { width: 210 } }; this.texts = []; this.page = 1; state.pdfs.push(this); }
+    constructor() { this.internal = { pageSize: { width: 210, height: 297 } }; this.texts = []; this.images = []; this.page = 1; state.pdfs.push(this); }
     setFont() {}
     setFontSize() {}
     setTextColor() {}
     text(value, x, y) { this.texts.push({ value, y, page: this.page }); }
     addPage() { this.page++; }
+    deletePage() { this.page--; }
     getImageProperties(image) {
       if (image === 'broken') throw new Error('Invalid image');
       return { width: 100, height: 1000 };
     }
-    addImage(image) { if (image === 'decode-error') throw new Error('Decode failed'); this.image = image; }
+    addImage(image, type, x, y, width, height) { if (image === 'decode-error') throw new Error('Decode failed'); this.image = image; this.images.push({ image, page: this.page, x, y, width, height }); }
     output() { return new Blob(['pdf']); }
   }
   const libraries = {
@@ -68,7 +69,7 @@ test('MXN totals are authoritative, including zero and original currency metadat
   const state = setup(t);
   const tickets = [ticket('1', { moneda_original: 'NOR' }), ticket('2', { total: 0, moneda_original: 'EUR', total_original: 10 }), ticket('3', { moneda_original: 'EUR', total_original: 5, tipo_cambio: 20 })];
   const before = structuredClone(tickets);
-  await exportWeeklyZip(tickets, async () => null);
+  await exportWeeklyZip(tickets, async () => ({ ticketImage: 'data:image/jpeg;base64,valid' }));
   assert.deepEqual(state.requests, []);
   assert.deepEqual(state.rows.slice(1).map((row) => row[4]), [100, 0, 100]);
   assert.deepEqual(tickets, before);
@@ -93,7 +94,7 @@ test('foreign currency conversion uses stored currency and shares historical req
   assert.deepEqual(state.requests, ['/fx/EUR/2026-09-22']);
   assert.deepEqual(state.rows.slice(1).map((row) => row[4]), [200, 300]);
   assert.deepEqual(state.rows[1].slice(7, 10), [160, 200, 40]);
-  assert.ok(state.pdfs[0].texts.some(({ value }) => value === '$160.00'));
+  assert.ok(state.pdfs.every((pdf) => pdf.texts.length === 0));
   assert.deepEqual(tickets, before);
 });
 
@@ -113,24 +114,30 @@ test('failed FX conversion remains an error instead of exporting incorrect MXN a
 
 test('missing images, IndexedDB failures and corrupt images do not drop tickets', async (t) => {
   const state = setup(t);
-  await exportWeeklyZip(['missing', 'db', 'corrupt', 'decode'].map((id) => ticket(id)), async (id) => {
+  const { warnings } = await exportWeeklyZip(['missing', 'db', 'corrupt', 'decode'].map((id) => ticket(id)), async (id) => {
     if (id === 'db') throw new Error('IndexedDB unavailable');
     if (id === 'corrupt') return { ticketImage: 'broken', voucherImage: 'data:image/jpeg;base64,valid' };
     if (id === 'decode') return { ticketImage: 'data:image/jpeg;base64,valid', voucherImage: 'decode-error' };
     return null;
   });
   assert.equal(state.pdfs.length, 4);
-  assert.equal(state.files.size, 5);
+  assert.equal(state.files.size, 4);
   assert.equal(state.rows.length, 5);
-  assert.ok(state.pdfs[0].texts.some(({ value }) => value.includes('Sin imagen')));
-  assert.ok(state.pdfs[2].texts.some(({ value }) => value.includes('No se pudo cargar')));
+  assert.equal(warnings.length, 4);
+  assert.ok(state.files.has('avisos.txt'));
+  assert.equal([...state.files.keys()].filter((path) => path.endsWith('.pdf')).length, 2);
+  assert.ok(state.pdfs.every((pdf) => pdf.texts.length === 0 && pdf.page === 1));
+  assert.equal(state.pdfs[2].images.length, 1);
+  assert.equal(state.pdfs[3].images.length, 1);
 });
 
-test('two tall images and summary fields paginate within the PDF', async (t) => {
+test('ticket and voucher use separate image-only pages within A4 bounds', async (t) => {
   const state = setup(t);
   await exportWeeklyZip([ticket('1', { total_ticket: 100, total_comprobante: 110, moneda_original: 'EUR', total_original: 5, items: [{ nombre: 'Producto', precio: 100 }] })], async () => ({ ticketImage: 'data:image/jpeg;base64,valid', voucherImage: 'data:image/jpeg;base64,valid' }));
-  assert.ok(state.pdfs[0].page > 1);
-  assert.ok(state.pdfs[0].texts.every(({ y }) => y <= 280));
+  assert.equal(state.pdfs[0].page, 2);
+  assert.equal(state.pdfs[0].texts.length, 0);
+  assert.deepEqual(state.pdfs[0].images.map((image) => image.page), [1, 2]);
+  assert.ok(state.pdfs[0].images.every(({ x, y, width, height }) => x >= 10 && y >= 10 && x + width <= 200 && y + height <= 287));
 });
 
 for (const library of ['JSZip', 'jspdf', 'XLSX']) {
@@ -190,7 +197,7 @@ test('mileage exports image-only PDF and explicit Excel distance/payment formula
   assert.equal(state.sheet.E2.v, 621.37);
   assert.equal(state.pdfs[0].texts.length, 0);
   assert.equal(state.pdfs[0].image, 'data:image/png;base64,valid');
-  assert.ok(state.pdfs[1].texts.some(({ value }) => value === 'Resumen'));
+  assert.equal(state.pdfs[1].texts.length, 0);
   assert.ok([...state.files.keys()].some((path) => path.includes('[MILLAS]')));
   assert.deepEqual(state.requests, []);
 });
