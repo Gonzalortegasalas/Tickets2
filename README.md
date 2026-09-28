@@ -69,18 +69,18 @@ Usa un modelo mini para mantener costo bajo. Si necesitas más precisión en tic
 ## Flujo local
 
 - Escanea uno o más tickets: sube una foto para analizar un ticket, o varias fotos para analizar varios tickets sin comprobante.
-- Analizar varios tickets con comprobantes: agrega pares de ticket + comprobante; el total final toma el monto más alto confiable, normalmente el comprobante cuando incluye propina.
+- Analizar ticket con comprobante: carga un solo par y revisa ambas vistas previas. Al guardarse, la selección se limpia para cargar el siguiente; si falla, conserva las fotos para reintentar. El total final toma el monto más alto confiable, normalmente el comprobante cuando incluye propina.
 - Todos los montos se guardan y exportan en MXN. Si OpenAI detecta otra moneda, la app convierte con el tipo de cambio histórico por fecha.
 - El CSV y el Excel del ZIP incluyen la columna `Codificacion` con formato `GOS [cuenta] año.mes.día - horaHRS - comercio - MXN$ monto`.
 - El ZIP semanal crea una carpeta por codificación y dentro guarda un PDF con únicamente las imágenes del ticket y del comprobante cuando existe, una imagen por página. Los datos y cálculos se conservan en Excel. Si falta una imagen legible, se avisa fuera del PDF; no se generan PDFs vacíos.
 
 ## Trayectos y millas
 
-- En Escanear, usa **Registrar millas** y adjunta una captura de Google Maps.
-- Puedes leer los kilómetros de la foto o ingresarlos manualmente. Revisa trayecto, fecha y distancia antes de guardar.
-- Se calcula `millas = km / 1.609344` y `pago MXN = redondear(millas × 10, 2)`, sin redondear primero la distancia.
+- En Escanear, usa **Registrar millas**, elige **Solo ida** o **Ida y vuelta** y adjunta una captura de Google Maps con la distancia de ida. Se lee y guarda automáticamente; si no hay fecha en la captura se usa la fecha local de hoy.
+- Si la foto no se puede leer, se conserva para reintentar o completar los kilómetros manualmente. Los registros guardados se pueden editar; al editar se confirma con **Guardar trayecto**.
+- Se calcula `millas = km / 1.609344 × factor` y `pago MXN = redondear(millas × 10, 2)`, sin redondear primero la distancia. El factor es 1 para solo ida y 2 para ida y vuelta; los kilómetros de la captura se conservan sin duplicar. Los registros anteriores siguen siendo de solo ida.
 - Los trayectos se guardan junto con los tickets y tienen filtro **MILLAS** y edición propia.
-- Excel conserva sus columnas existentes y agrega kilómetros, millas y tarifa; la cuenta y la codificación usan **MILLAS**. Las celdas de millas e importe incluyen fórmulas y valores calculados.
+- Excel conserva sus columnas existentes y agrega el tipo de trayecto y factor del recorrido a kilómetros, millas y tarifa; la cuenta y la codificación usan **MILLAS**. Las celdas de millas e importe incluyen fórmulas y valores calculados. El CSV también indica el tipo y factor.
 - El PDF de un trayecto contiene únicamente la captura. Si falta la foto, el ZIP conserva el registro en Excel y avisa en pantalla y en `avisos.txt`; no genera un PDF vacío.
 - Las fotos siguen siendo locales: exporta desde el mismo dispositivo y navegador donde las guardaste.
 - Validación: `npm test` y `npm run check`.

@@ -83,6 +83,13 @@ code { display: inline-block; padding: 2px 5px; border-radius: 5px; background: 
   background: #fff;
 }
 
+.ticket-capture-panel { padding: 12px; }
+.ticket-capture-panel .panel-head { margin-bottom: 6px; }
+.ticket-capture-panel .field-title { margin-bottom: 6px; }
+.ticket-capture-panel .dropzone { min-height: 104px; padding: 10px 8px; }
+.ticket-capture-panel .drop-icon { font-size: 24px; }
+.ticket-capture-panel .preview { max-height: 180px; }
+
 .multi-picker {
   display: block;
   border: 1.5px solid var(--line);
@@ -198,6 +205,11 @@ button {
 .primary-btn { background: var(--accent); color: white; }
 .primary-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .secondary-btn { background: white; color: var(--accent); border: 1.5px solid var(--accent); }
+.mileage-btn { background: var(--ok); border-color: var(--ok); color: white; }
+.mileage-btn:hover { background: #1b6030; border-color: #1b6030; }
+.mileage-trip-options { display: flex; gap: 8px; }
+.mileage-trip-options button { flex: 1; margin-top: 0; }
+.mileage-trip-options [aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: white; }
 .danger-btn { background: #fff2f1; color: var(--danger); border: 1.5px solid var(--danger); }
 .compact { width: auto; padding: 0 14px; margin-top: 0; }
 .icon-btn {

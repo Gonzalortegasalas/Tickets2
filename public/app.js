@@ -13,9 +13,10 @@ let ticketImage = null;
 let mileageImage = null;
 let mileageEditingId = null;
 let mileageBusy = false;
+let mileageRoundTrip = false;
 let batchQueue = [];
 let batchRunning = false;
-let pairQueue = [];
+let currentPair = null;
 let pairRunning = false;
 const customPaymentEditors = new Set();
 const ticketView = {
@@ -32,14 +33,15 @@ function init() {
   $('mileage-image').addEventListener('change', loadMileageImage);
   $('mileage-analyze').addEventListener('click', analyzeMileageImage);
   $('mileage-km').addEventListener('input', updateMileageCalculation);
+  $('mileage-one-way').addEventListener('click', () => selectMileageTrip(false));
+  $('mileage-round-trip').addEventListener('click', () => selectMileageTrip(true));
   $('mileage-form').addEventListener('submit', saveMileage);
   $('mileage-cancel').addEventListener('click', () => { if (!mileageBusy) $('mileage-dialog').close(); });
   $('mileage-dialog').addEventListener('cancel', (event) => { if (mileageBusy) event.preventDefault(); });
   $('ticket-input').addEventListener('change', loadTicketSelection);
   $('clear-ticket').addEventListener('click', clearTicketImage);
   $('scan-btn').addEventListener('click', processTicketSelection);
-  $('add-pair-btn').addEventListener('click', addPair);
-  $('pair-scan-btn').addEventListener('click', processPairQueue);
+  $('pair-scan-btn').addEventListener('click', processPair);
   $('manual-btn').addEventListener('click', openManualDialog);
   $('save-manual').addEventListener('click', saveManualTicket);
   $('export-csv').addEventListener('click', exportCsv);
@@ -67,7 +69,7 @@ function init() {
   $('manual-date').valueAsDate = new Date();
 
   renderAll();
-  addPair();
+  resetPair();
   ensureTicketsInMxn({ persist: true });
   loadFromCloud();
 }
@@ -307,144 +309,117 @@ function batchStatusLabel(item) {
   return { text: 'Pendiente', className: '' };
 }
 
-function addPair() {
-  pairQueue.push({
-    id: crypto.randomUUID ? crypto.randomUUID() : `pair-${Date.now()}-${Math.random()}`,
+function resetPair() {
+  currentPair = {
     ticketImage: null,
     voucherImage: null,
     ticketName: '',
     voucherName: '',
     status: 'pendiente',
     error: null
-  });
-  renderPairQueue();
+  };
+  renderPair();
 }
 
-async function loadPairImage(event, pairId, kind) {
+async function loadPairImage(event, kind) {
   const file = event.target.files?.[0];
-  if (!file) return;
-
-  const pair = pairQueue.find((item) => item.id === pairId);
-  if (!pair) return;
+  const pair = currentPair;
+  if (!file || pairRunning || pair.status === 'comprimiendo') return;
 
   try {
     pair.status = 'comprimiendo';
     pair.error = null;
-    renderPairQueue();
-    const dataUrl = await compressImage(file, 1800, 0.82);
-    if (kind === 'ticket') {
-      pair.ticketImage = dataUrl;
-      pair.ticketName = file.name || 'Ticket';
-    } else {
-      pair.voucherImage = dataUrl;
-      pair.voucherName = file.name || 'Comprobante';
-    }
+    pair[kind + 'Image'] = null;
+    pair[kind + 'Name'] = '';
+    renderPair();
+    pair[kind + 'Image'] = await compressImage(file, 1800, 0.82);
+    pair[kind + 'Name'] = file.name || (kind === 'ticket' ? 'Ticket' : 'Comprobante');
     pair.status = pairReady(pair) ? 'listo' : 'pendiente';
-    renderPairQueue();
   } catch (error) {
     pair.status = 'error';
     pair.error = error.message || 'No se pudo preparar la imagen.';
-    renderPairQueue();
+  } finally {
+    renderPair();
   }
 }
 
-async function processPairQueue() {
-  const readyPairs = pairQueue.filter((pair) => pairReady(pair) && pair.status !== 'guardado');
-  if (!readyPairs.length || pairRunning) return;
+async function processPair() {
+  const pair = currentPair;
+  if (!pairReady(pair) || pairRunning || pair.status === 'comprimiendo') return;
 
   pairRunning = true;
-  $('pair-scan-btn').disabled = true;
+  pair.status = 'analizando';
+  pair.error = null;
+  renderPair();
   $('scan-btn').disabled = true;
-  $('scan-result').innerHTML = '<div class="alert ok">Analizando pares ticket + comprobante...</div>';
+  $('scan-result').innerHTML = '<div class="alert ok">Analizando ticket y comprobante...</div>';
+  setStatus('Analizando par...');
 
-  let saved = 0;
-  let failed = 0;
-
-  for (const pair of readyPairs) {
-    pair.status = 'analizando';
-    pair.error = null;
-    renderPairQueue();
-    setStatus(`Analizando par ${saved + failed + 1} de ${readyPairs.length}...`);
-
-    try {
-      const response = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketImage: pair.ticketImage, voucherImage: pair.voucherImage })
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error?.message || 'No se pudo escanear este par.');
-      }
-
-      const info = await convertInfoToMxn(data.ticket);
-      const ticket = buildTicket(info);
-      await storeTicketImages(ticket.id, { ticketImage: pair.ticketImage, voucherImage: pair.voucherImage });
-      tickets.unshift(ticket);
-      saveLocalTickets();
-      await saveToCloud({ upserts: [ticket] });
-      pair.status = 'guardado';
-      pair.ticketId = ticket.id;
-      saved += 1;
-    } catch (error) {
-      pair.status = 'error';
-      pair.error = error.message || 'Error';
-      failed += 1;
+  try {
+    const response = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketImage: pair.ticketImage, voucherImage: pair.voucherImage })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data?.error?.message || 'No se pudo escanear este par.');
     }
 
-    renderPairQueue();
+    const info = await convertInfoToMxn(data.ticket);
+    const ticket = buildTicket(info);
+    await storeTicketImages(ticket.id, { ticketImage: pair.ticketImage, voucherImage: pair.voucherImage });
+    tickets.unshift(ticket);
+    try {
+      saveLocalTickets();
+    } catch (error) {
+      tickets = tickets.filter((item) => item.id !== ticket.id);
+      throw error;
+    }
+    await saveToCloud({ upserts: [ticket] });
+    resetPair();
     renderAll();
+    $('scan-result').innerHTML = '<div class="alert ok">Par guardado. Ya puedes cargar el siguiente ticket y comprobante.</div>';
+    setStatus('Par guardado. Listo para el siguiente.');
+  } catch (error) {
+    pair.status = 'error';
+    pair.error = error.message || 'No se pudo analizar el par.';
+    $('scan-result').innerHTML = '<div class="alert error">No se pudo guardar el par. Las fotos siguen seleccionadas para reintentar.</div>';
+    setStatus(pair.error, true);
+  } finally {
+    pairRunning = false;
+    updateTicketActionButton();
+    renderPair();
   }
-
-  pairRunning = false;
-  updateTicketActionButton();
-  renderPairQueue();
-  $('scan-result').innerHTML = `<div class="alert ${failed ? 'error' : 'ok'}">Pares terminados: ${saved} guardados, ${failed} con error.</div>`;
-  setStatus(`Pares terminados: ${saved} guardados, ${failed} con error`, Boolean(failed));
 }
 
-function removePair(pairId) {
-  pairQueue = pairQueue.filter((pair) => pair.id !== pairId);
-  if (!pairQueue.length) addPair();
-  else renderPairQueue();
-}
-
-function renderPairQueue() {
+function renderPair() {
+  const pair = currentPair;
   const list = $('pair-list');
-  list.innerHTML = pairQueue.map((pair, index) => {
-    const label = pairStatusLabel(pair);
-    return `
-      <div class="pair-item">
-        <div class="pair-head">
-          <strong>Par ${index + 1}</strong>
-          <button class="mini-btn danger" data-pair-remove="${pair.id}" type="button">Quitar</button>
-        </div>
-        <div class="pair-grid">
+  const label = pairStatusLabel(pair);
+  const busy = pairRunning || pair.status === 'comprimiendo';
+  list.innerHTML = `
+    <div class="pair-item">
+      <div class="pair-grid">
+        ${[['ticket', 'Ticket'], ['voucher', 'Comprobante']].map(([kind, title]) => `
           <label class="pair-picker">
-            <input data-pair-input="${pair.id}" data-kind="ticket" type="file" accept="image/*">
-            <span>Ticket</span>
-            <small>${escapeHtml(pair.ticketName || 'Seleccionar foto')}</small>
+            <input data-pair-input data-kind="${kind}" type="file" accept="image/*" ${busy ? 'disabled' : ''}>
+            <span>${title}</span>
+            <small>${escapeHtml(pair[kind + 'Name'] || 'Seleccionar foto')}</small>
+            ${pair[kind + 'Image'] ? `<img class="preview" src="${escapeHtml(pair[kind + 'Image'])}" alt="Vista previa: ${title}">` : ''}
           </label>
-          <label class="pair-picker">
-            <input data-pair-input="${pair.id}" data-kind="voucher" type="file" accept="image/*">
-            <span>Comprobante</span>
-            <small>${escapeHtml(pair.voucherName || 'Seleccionar foto')}</small>
-          </label>
-        </div>
-        <div class="pair-status ${label.className}" title="${escapeHtml(pair.error || label.text)}">${escapeHtml(label.text)}</div>
+        `).join('')}
       </div>
-    `;
-  }).join('');
-
+      <div class="pair-status ${label.className}" role="status">${escapeHtml(label.text)}</div>
+    </div>
+  `;
   list.querySelectorAll('input[data-pair-input]').forEach((input) => {
-    input.addEventListener('change', (event) => loadPairImage(event, input.dataset.pairInput, input.dataset.kind));
+    input.addEventListener('change', (event) => loadPairImage(event, input.dataset.kind));
   });
-  list.querySelectorAll('button[data-pair-remove]').forEach((button) => {
-    button.addEventListener('click', () => removePair(button.dataset.pairRemove));
-  });
-
-  $('pair-scan-btn').disabled = pairRunning || !pairQueue.some((pair) => pairReady(pair) && pair.status !== 'guardado');
+  $('pair-scan-btn').disabled = busy || !pairReady(pair);
+  $('pair-scan-btn').textContent = pairRunning ? 'Analizando par...' : 'Analizar par';
 }
+
 
 function pairReady(pair) {
   return Boolean(pair.ticketImage && pair.voucherImage);
@@ -453,7 +428,6 @@ function pairReady(pair) {
 function pairStatusLabel(pair) {
   if (pair.status === 'comprimiendo') return { text: 'Comprimiendo', className: 'running' };
   if (pair.status === 'analizando') return { text: 'Analizando', className: 'running' };
-  if (pair.status === 'guardado') return { text: 'Guardado', className: 'done' };
   if (pair.status === 'error') return { text: pair.error || 'Error', className: 'error' };
   if (!pair.ticketImage && !pair.voucherImage) return { text: 'Faltan ticket y comprobante', className: '' };
   if (!pair.ticketImage) return { text: 'Falta ticket', className: '' };
@@ -924,6 +898,9 @@ async function openMileageDialog(id = null) {
   $('mileage-analyze').disabled = true;
   $('mileage-message').textContent = '';
   const ticket = tickets.find((item) => item.id === id);
+  const today = new Date();
+  $('mileage-date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  selectMileageTrip(ticket?.info.ida_vuelta === true);
   if (ticket) {
     $('mileage-route').value = ticket.info.tienda || '';
     $('mileage-date').value = dateForFx(ticket.info.fecha);
@@ -950,25 +927,29 @@ async function openMileageDialog(id = null) {
 
 function setMileageBusy(busy) {
   mileageBusy = busy;
-  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel'].forEach((id) => { $(id).disabled = busy; });
+  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
   $('mileage-analyze').disabled = busy || !mileageImage;
 }
 
 async function loadMileageImage(event) {
+  if (mileageBusy) return;
   const file = event.target.files?.[0];
   if (!file) return;
   setMileageBusy(true);
   mileageImage = null;
+  $('mileage-km').value = '';
+  $('mileage-route').value = '';
+  updateMileageCalculation();
   $('mileage-preview').hidden = true;
   $('mileage-message').textContent = 'Preparando captura...';
   try {
     mileageImage = await compressImage(file, 1800, 0.9);
     $('mileage-preview').src = mileageImage;
     $('mileage-preview').hidden = false;
-    $('mileage-message').textContent = 'Foto lista. Lee los kilómetros o escríbelos manualmente.';
   } catch (error) {
     $('mileage-message').textContent = error.message;
   } finally { setMileageBusy(false); }
+  if (mileageImage) await analyzeMileageImage();
 }
 
 async function analyzeMileageImage() {
@@ -981,21 +962,33 @@ async function analyzeMileageImage() {
       body: JSON.stringify({ routeImage: mileageImage })
     });
     const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data?.error?.message || 'No se pudo leer la captura.');
+    if (!response.ok || !data.ok || !data.route) throw new Error(data?.error?.message || 'No se pudo leer la captura.');
     $('mileage-km').value = data.route.kilometros ?? '';
+    if (typeof data.route.kilometros !== 'number' || !Number.isFinite(data.route.kilometros) || data.route.kilometros <= 0) {
+      throw new Error('No se pudo identificar una distancia clara.');
+    }
     if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
     if (/^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
     $('mileage-message').textContent = [data.route.notas, 'Revisa los kilómetros y la fecha antes de guardar.'].filter(Boolean).join(' ');
     updateMileageCalculation();
+    if (!mileageEditingId) await persistMileage();
   } catch (error) {
     $('mileage-message').textContent = `${error.message} Puedes ingresar los kilómetros manualmente.`;
   } finally { setMileageBusy(false); }
 }
 
+function selectMileageTrip(roundTrip) {
+  if (mileageBusy) return;
+  mileageRoundTrip = roundTrip;
+  $('mileage-one-way').setAttribute('aria-pressed', String(!roundTrip));
+  $('mileage-round-trip').setAttribute('aria-pressed', String(roundTrip));
+  updateMileageCalculation();
+}
+
 function updateMileageCalculation() {
   try {
-    const values = calculateMileage(parseMoneyInput($('mileage-km').value));
-    $('mileage-calculation').textContent = `${values.km} km ÷ 1.609344 = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
+    const values = calculateMileage(parseMoneyInput($('mileage-km').value), mileageRoundTrip);
+    $('mileage-calculation').textContent = `${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'}: ${values.km} km ÷ 1.609344${mileageRoundTrip ? ' × 2' : ''} = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
   } catch {
     $('mileage-calculation').textContent = '1 milla = 1.609344 km · $10 MXN por milla';
   }
@@ -1006,21 +999,27 @@ async function saveMileage(event) {
   if (mileageBusy) return;
   setMileageBusy(true);
   try {
-    if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
-    const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value });
-    const previous = tickets.find((item) => item.id === mileageEditingId);
-    const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
-    await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
-    if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
-    else tickets.unshift(ticket);
-    saveLocalTickets();
-    await saveToCloud({ upserts: [ticket] });
-    renderAll();
-    $('mileage-dialog').close();
-    setStatus('Trayecto guardado como MILLAS');
+    await persistMileage();
   } catch (error) {
     $('mileage-message').textContent = error.message || 'No se pudo guardar el trayecto.';
   } finally { setMileageBusy(false); }
+}
+
+async function persistMileage() {
+  if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
+  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, roundTrip: mileageRoundTrip });
+  const previous = tickets.find((item) => item.id === mileageEditingId);
+  const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
+  await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
+  const previousTickets = tickets.slice();
+  if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
+  else tickets.unshift(ticket);
+  try { saveLocalTickets(); } catch (error) { tickets = previousTickets; throw error; }
+  mileageEditingId = ticket.id;
+  await saveToCloud({ upserts: [ticket] });
+  renderAll();
+  $('mileage-dialog').close();
+  setStatus(`Trayecto guardado como MILLAS · ${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'} · ${formatCurrency(info.total)}`);
 }
 
 function renderMileageCard(ticket) {
@@ -1028,7 +1027,7 @@ function renderMileageCard(ticket) {
   return `<article class="ticket-card">
     <div class="ticket-row"><div><h3 class="ticket-title">${escapeHtml(info.tienda)}</h3>
       <p class="ticket-meta">MILLAS · ${escapeHtml(info.fecha)}</p>
-      <p class="ticket-meta">${numberOrZero(info.kilometros)} km → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
+      <p class="ticket-meta">${info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida'} · ${numberOrZero(info.kilometros)} km${info.ida_vuelta === true ? ' × 2' : ''} → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
     </div><div class="ticket-total">${formatCurrency(info.total)}</div></div>
     <div class="ticket-actions">
       <button class="mini-btn" data-action="mileage-edit" data-id="${ticket.id}" type="button">Editar trayecto</button>
@@ -1094,7 +1093,7 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla', 'Tipo de trayecto', 'Factor recorrido'],
     ...tickets.map((ticket) => [
       'GOS',
       ticket.info.fecha || '',
@@ -1111,7 +1110,9 @@ function exportCsv() {
       ticket.info.notas || '',
       ticket.info.kilometros || '',
       ticket.info.millas || '',
-      ticket.info.tarifa_milla || ''
+      ticket.info.tarifa_milla || '',
+      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida') : '',
+      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 2 : 1) : ''
     ])
   ];
   downloadBlob(toCsv(rows), 'tickets.csv', 'text/csv;charset=utf-8');
