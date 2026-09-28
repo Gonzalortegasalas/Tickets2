@@ -112,6 +112,7 @@ test('busy scan locks trip choice and prevents duplicate uploads and saves', asy
   const pending = upload();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(elements.get('mileage-round-trip').disabled, true);
+  assert.equal(elements.get('mileage-date').disabled, true);
   run('selectMileageTrip(true)');
   await upload();
   await run('saveMileage({preventDefault(){}})');
@@ -120,6 +121,57 @@ test('busy scan locks trip choice and prevents duplicate uploads and saves', asy
   assert.equal(state.requests.length, 1);
   assert.equal(state.saved.length, 1);
   assert.equal(state.saved[0].info.ida_vuelta, false);
+});
+
+test('manual date survives upload preparation and retry without being replaced by the image date', async () => {
+  const { state, elements, run, upload } = setup();
+  run('resetMileageCapture()');
+  elements.get('mileage-date').value = '2026-08-12';
+  run('mileageDateManual = true');
+  state.route.fecha = '2026-09-28';
+  state.fail = 'network';
+  await upload();
+  assert.equal(elements.get('mileage-date').value, '2026-08-12');
+  state.fail = null;
+  await run('analyzeMileageImage()');
+  assert.equal(state.saved[0].info.fecha, '12/08/2026');
+  assert.equal(run('mileageDateManual'), false);
+});
+
+test('editing the date without a local photo preserves the record, distance and image storage', async () => {
+  const { state, elements, run, upload } = setup();
+  run('resetMileageCapture()');
+  run('selectMileageTrip(true)');
+  await upload();
+  const original = state.saved[0];
+  run('getTicketImages = async () => null');
+  await run('editMileage(tickets[0].id)');
+  assert.equal(elements.get('mileage-save').disabled, false);
+  elements.get('mileage-date').value = '2026-08-15';
+  await run('saveMileage({preventDefault(){}})');
+  assert.equal(state.saved.length, 1);
+  assert.equal(state.saved[0].id, original.id);
+  assert.equal(state.saved[0].info.fecha, '15/08/2026');
+  assert.equal(state.saved[0].info.total, original.info.total);
+  assert.equal(state.saved[0].info.kilometros, original.info.kilometros);
+  assert.equal(state.images.length, 1);
+});
+
+test('replacing an edited route photo keeps its date, and an invalid date cannot overwrite the record', async () => {
+  const { state, elements, run, upload } = setup();
+  run('resetMileageCapture()');
+  await upload();
+  await run('editMileage(tickets[0].id)');
+  elements.get('mileage-date').value = '2026-08-15';
+  state.route.fecha = '2026-09-28';
+  await upload();
+  assert.equal(state.saved.length, 1);
+  assert.equal(state.saved[0].info.fecha, '15/08/2026');
+  await run('editMileage(tickets[0].id)');
+  elements.get('mileage-date').value = '';
+  await run('saveMileage({preventDefault(){}})');
+  assert.equal(state.saved[0].info.fecha, '15/08/2026');
+  assert.match(elements.get('mileage-message').textContent, /fecha/);
 });
 
 test('editing a round trip keeps the base kilometers and saves changes without doubling twice', async () => {
