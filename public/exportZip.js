@@ -9,6 +9,7 @@ import {
   roundMoney,
   sanitizeFolderName
 } from './exportHelpers.js';
+import { calculateMileage } from './mileage.js';
 
 export async function exportWeeklyZip(tickets, getTicketImages) {
   if (!tickets.length) throw new Error('No hay tickets para exportar.');
@@ -24,6 +25,7 @@ export async function exportWeeklyZip(tickets, getTicketImages) {
   const exportTickets = await prepareTicketsForMxnExport(tickets);
   const zip = new window.JSZip();
   const weeks = groupTicketsByWeek(exportTickets);
+  const warnings = [];
 
   for (const [weekFolder, weekTickets] of weeks) {
     const weekZip = zip.folder(weekFolder);
@@ -40,17 +42,20 @@ export async function exportWeeklyZip(tickets, getTicketImages) {
         console.warn(`No se pudieron leer las imágenes del ticket ${ticket.id}:`, error);
       }
       const pdfBlob = await buildTicketPdf(ticket.exportInfo, images);
-      ticketFolder.file('ticket.pdf', pdfBlob);
+      if (pdfBlob) ticketFolder.file('ticket.pdf', pdfBlob);
+      else warnings.push(`MILLAS: falta una captura legible para ${ticket.exportInfo.tienda || ticket.id}. Exporta desde el dispositivo donde guardaste la foto o adjúntala de nuevo.`);
     }
   }
 
   const workbook = buildWorkbook(exportTickets);
   const excelArrayBuffer = window.XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
   zip.file('gastos_GOS.xlsx', excelArrayBuffer);
+  if (warnings.length) zip.file('avisos.txt', warnings.join('\n'));
 
   const blob = await zip.generateAsync({ type: 'blob' });
   const today = new Date().toISOString().slice(0, 10);
   downloadBlob(blob, `Tickets_GOS_${today}.zip`);
+  return { warnings };
 }
 
 function uniqueFolderName(baseName, usedNames) {
@@ -65,6 +70,11 @@ async function prepareTicketsForMxnExport(tickets) {
 
   return Promise.all(tickets.map(async (ticket) => {
     const exportInfo = { ...ticket.info };
+    if (exportInfo.tipo === 'millas') {
+      const values = calculateMileage(exportInfo.kilometros);
+      Object.assign(exportInfo, { total: values.total, millas: values.miles, tarifa_milla: values.rate, moneda: 'MXN' });
+      return { ...ticket, exportInfo };
+    }
     const sourceCurrency = getOriginalCurrency(ticket.info);
     const sourceAmount = getOriginalAmount(ticket.info, sourceCurrency);
 
@@ -129,6 +139,19 @@ async function buildTicketPdf(info, images) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const width = doc.internal.pageSize.width;
+  if (info.tipo === 'millas') {
+    // Never emit a blank PDF or add receipt text in place of route evidence.
+    if (!images?.ticketImage) return null;
+    if (images?.ticketImage) {
+      try {
+        drawImage(doc, images.ticketImage, 10, 10, width - 20, 277);
+      } catch (error) {
+        console.warn('No se pudo incluir la captura del trayecto:', error);
+        return null;
+      }
+    }
+    return doc.output('blob');
+  }
   let y = 16;
 
   doc.setFont('helvetica', 'bold');
@@ -255,7 +278,10 @@ function buildWorkbook(tickets) {
     'Moneda original',
     'Monto original',
     'Tipo de cambio',
-    'Fecha tipo de cambio'
+    'Fecha tipo de cambio',
+    'Kilometros',
+    'Millas (km / 1.609344)',
+    'Tarifa MXN por milla'
   ]];
 
   for (const ticket of tickets) {
@@ -275,11 +301,20 @@ function buildWorkbook(tickets) {
       info.moneda_original || '',
       info.moneda_original ? numberOrZero(info.total_original) : '',
       info.tipo_cambio || '',
-      info.fecha_tipo_cambio || ''
+      info.fecha_tipo_cambio || '',
+      info.tipo === 'millas' ? info.kilometros : '',
+      info.tipo === 'millas' ? info.millas : '',
+      info.tipo === 'millas' ? info.tarifa_milla : ''
     ]);
   }
 
   const ws = window.XLSX.utils.aoa_to_sheet(rows);
+  tickets.forEach((ticket, index) => {
+    if (ticket.exportInfo.tipo !== 'millas') return;
+    const row = index + 2;
+    ws[`Q${row}`] = { t: 'n', f: `P${row}/1.609344`, v: ticket.exportInfo.millas, z: '0.0000' };
+    ws[`E${row}`] = { t: 'n', f: `ROUND(Q${row}*R${row},2)`, v: ticket.exportInfo.total, z: '0.00' };
+  });
   ws['!cols'] = [
     { wch: 12 },
     { wch: 12 },
@@ -295,7 +330,10 @@ function buildWorkbook(tickets) {
     { wch: 15 },
     { wch: 14 },
     { wch: 14 },
-    { wch: 18 }
+    { wch: 18 },
+    { wch: 14 },
+    { wch: 24 },
+    { wch: 22 }
   ];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
   return wb;
