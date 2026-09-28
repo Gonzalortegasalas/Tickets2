@@ -8,6 +8,7 @@ export function buildCodificacion(info) {
 }
 
 export function getCuenta(info) {
+  if (info.tipo === 'millas') return 'MILLAS';
   const digits = String(info.tarjeta || '').replace(/\D/g, '');
   return digits ? digits.slice(-4) : 'EFVO';
 }

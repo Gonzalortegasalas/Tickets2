@@ -46,6 +46,7 @@
       </article>
 
       <button id="manual-btn" class="secondary-btn" type="button">Registrar manualmente</button>
+      <button id="mileage-btn" class="secondary-btn" type="button">Registrar millas</button>
       <div id="scan-result"></div>
     </section>
 
@@ -69,6 +70,7 @@
           <select id="ticket-account-filter">
             <option value="all">Todas</option>
             <option value="cash">Efectivo</option>
+            <option value="millas">MILLAS</option>
             <option value="3139">3139</option>
             <option value="6679">6679</option>
             <option value="other">Otra tarjeta</option>
@@ -124,6 +126,25 @@
       <menu>
         <button value="cancel" class="secondary-btn" type="submit">Cancelar</button>
         <button id="save-manual" value="default" class="primary-btn" type="button">Guardar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="mileage-dialog">
+    <form id="mileage-form" class="manual-form">
+      <h2>Registrar millas</h2>
+      <p>Adjunta la captura del trayecto de Google Maps y revisa los kilómetros antes de guardar.</p>
+      <label>Foto del trayecto<input id="mileage-image" type="file" accept="image/*"></label>
+      <img id="mileage-preview" class="preview" alt="Captura del trayecto" hidden>
+      <button id="mileage-analyze" class="secondary-btn" type="button" disabled>Leer kilómetros de la foto</button>
+      <label>Trayecto<input id="mileage-route" type="text" placeholder="Origen → destino" required></label>
+      <label>Fecha del trayecto<input id="mileage-date" type="date" required></label>
+      <label>Kilómetros recorridos<input id="mileage-km" type="text" inputmode="decimal" required></label>
+      <p id="mileage-calculation" aria-live="polite">1 milla = 1.609344 km · $10 MXN por milla</p>
+      <p id="mileage-message" role="status"></p>
+      <menu>
+        <button id="mileage-cancel" class="secondary-btn" type="button">Cancelar</button>
+        <button id="mileage-save" class="primary-btn" type="submit">Guardar trayecto</button>
       </menu>
     </form>
   </dialog>

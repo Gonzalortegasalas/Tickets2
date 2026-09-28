@@ -1,5 +1,6 @@
 import { exportWeeklyZip } from './exportZip.js';
 import { buildCodificacion, dateForFx, numberOrZero, roundMoney } from './exportHelpers.js';
+import { buildMileageInfo, calculateMileage } from './mileage.js';
 
 const categories = ['Alimentos', 'Supermercado', 'Restaurante', 'Transporte', 'Gasolina', 'Salud', 'Farmacia', 'Tecnologia', 'Electronica', 'Hogar', 'Ferreteria', 'Ropa', 'Otro'];
 const IMAGE_DB_NAME = 'tickets2-images';
@@ -9,6 +10,9 @@ const knownPaymentAccounts = ['3139', '6679'];
 
 let tickets = loadLocalTickets();
 let ticketImage = null;
+let mileageImage = null;
+let mileageEditingId = null;
+let mileageBusy = false;
 let batchQueue = [];
 let batchRunning = false;
 let pairQueue = [];
@@ -24,6 +28,13 @@ const $ = (id) => document.getElementById(id);
 init();
 
 function init() {
+  $('mileage-btn').addEventListener('click', () => openMileageDialog());
+  $('mileage-image').addEventListener('change', loadMileageImage);
+  $('mileage-analyze').addEventListener('click', analyzeMileageImage);
+  $('mileage-km').addEventListener('input', updateMileageCalculation);
+  $('mileage-form').addEventListener('submit', saveMileage);
+  $('mileage-cancel').addEventListener('click', () => { if (!mileageBusy) $('mileage-dialog').close(); });
+  $('mileage-dialog').addEventListener('cancel', (event) => { if (mileageBusy) event.preventDefault(); });
   $('ticket-input').addEventListener('change', loadTicketSelection);
   $('clear-ticket').addEventListener('click', clearTicketImage);
   $('scan-btn').addEventListener('click', processTicketSelection);
@@ -510,6 +521,7 @@ function renderTickets() {
 
   list.innerHTML = visibleTickets.map((ticket) => {
     const info = ticket.info;
+    if (info.tipo === 'millas') return renderMileageCard(ticket);
     const paymentValue = paymentSelectValue(ticket);
     const customValue = paymentDigits(info.tarjeta);
     const faceAmount = ticketFaceAmount(info);
@@ -578,6 +590,7 @@ function renderTickets() {
       if (button.dataset.action === 'duplicate') duplicateTicket(button.dataset.id);
       if (button.dataset.action === 'payment-save') saveCustomPayment(button.dataset.id);
       if (button.dataset.action === 'currency-apply') applyTicketAmountCurrency(button.dataset.id);
+      if (button.dataset.action === 'mileage-edit') openMileageDialog(button.dataset.id);
     });
   });
 
@@ -609,6 +622,7 @@ function matchesAccountFilter(ticket) {
 }
 
 function ticketAccountGroup(ticket) {
+  if (ticket.info?.tipo === 'millas') return 'millas';
   const digits = paymentDigits(ticket.info?.tarjeta);
   if (!digits) return 'cash';
   if (digits === '3139' || digits === '6679') return digits;
@@ -900,6 +914,129 @@ async function duplicateTicket(id) {
   renderAll();
 }
 
+async function openMileageDialog(id = null) {
+  if (mileageBusy) return;
+  mileageEditingId = id;
+  mileageImage = null;
+  $('mileage-form').reset();
+  $('mileage-preview').hidden = true;
+  $('mileage-preview').removeAttribute('src');
+  $('mileage-analyze').disabled = true;
+  $('mileage-message').textContent = '';
+  const ticket = tickets.find((item) => item.id === id);
+  if (ticket) {
+    $('mileage-route').value = ticket.info.tienda || '';
+    $('mileage-date').value = dateForFx(ticket.info.fecha);
+    $('mileage-km').value = ticket.info.kilometros;
+  }
+  updateMileageCalculation();
+  $('mileage-dialog').showModal();
+  if (ticket) {
+    setMileageBusy(true);
+    try {
+      const images = await getTicketImages(id);
+      mileageImage = images?.ticketImage || null;
+      if (mileageImage) {
+        $('mileage-preview').src = mileageImage;
+        $('mileage-preview').hidden = false;
+      } else {
+        $('mileage-message').textContent = 'La foto no está en este dispositivo. Adjunta la captura para guardar.';
+      }
+    } catch {
+      $('mileage-message').textContent = 'No se pudo leer la foto local. Puedes adjuntarla de nuevo.';
+    } finally { setMileageBusy(false); }
+  }
+}
+
+function setMileageBusy(busy) {
+  mileageBusy = busy;
+  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel'].forEach((id) => { $(id).disabled = busy; });
+  $('mileage-analyze').disabled = busy || !mileageImage;
+}
+
+async function loadMileageImage(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  setMileageBusy(true);
+  mileageImage = null;
+  $('mileage-preview').hidden = true;
+  $('mileage-message').textContent = 'Preparando captura...';
+  try {
+    mileageImage = await compressImage(file, 1800, 0.9);
+    $('mileage-preview').src = mileageImage;
+    $('mileage-preview').hidden = false;
+    $('mileage-message').textContent = 'Foto lista. Lee los kilómetros o escríbelos manualmente.';
+  } catch (error) {
+    $('mileage-message').textContent = error.message;
+  } finally { setMileageBusy(false); }
+}
+
+async function analyzeMileageImage() {
+  if (!mileageImage || mileageBusy) return;
+  setMileageBusy(true);
+  $('mileage-message').textContent = 'Leyendo trayecto...';
+  try {
+    const response = await fetch('/api/scan-mileage', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routeImage: mileageImage })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data?.error?.message || 'No se pudo leer la captura.');
+    $('mileage-km').value = data.route.kilometros ?? '';
+    if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
+    $('mileage-message').textContent = [data.route.notas, 'Revisa los kilómetros y la fecha antes de guardar.'].filter(Boolean).join(' ');
+    updateMileageCalculation();
+  } catch (error) {
+    $('mileage-message').textContent = `${error.message} Puedes ingresar los kilómetros manualmente.`;
+  } finally { setMileageBusy(false); }
+}
+
+function updateMileageCalculation() {
+  try {
+    const values = calculateMileage(parseMoneyInput($('mileage-km').value));
+    $('mileage-calculation').textContent = `${values.km} km ÷ 1.609344 = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
+  } catch {
+    $('mileage-calculation').textContent = '1 milla = 1.609344 km · $10 MXN por milla';
+  }
+}
+
+async function saveMileage(event) {
+  event.preventDefault();
+  if (mileageBusy) return;
+  setMileageBusy(true);
+  try {
+    if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
+    const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value });
+    const previous = tickets.find((item) => item.id === mileageEditingId);
+    const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
+    await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
+    if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
+    else tickets.unshift(ticket);
+    saveLocalTickets();
+    await saveToCloud({ upserts: [ticket] });
+    renderAll();
+    $('mileage-dialog').close();
+    setStatus('Trayecto guardado como MILLAS');
+  } catch (error) {
+    $('mileage-message').textContent = error.message || 'No se pudo guardar el trayecto.';
+  } finally { setMileageBusy(false); }
+}
+
+function renderMileageCard(ticket) {
+  const info = ticket.info;
+  return `<article class="ticket-card">
+    <div class="ticket-row"><div><h3 class="ticket-title">${escapeHtml(info.tienda)}</h3>
+      <p class="ticket-meta">MILLAS · ${escapeHtml(info.fecha)}</p>
+      <p class="ticket-meta">${numberOrZero(info.kilometros)} km → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
+    </div><div class="ticket-total">${formatCurrency(info.total)}</div></div>
+    <div class="ticket-actions">
+      <button class="mini-btn" data-action="mileage-edit" data-id="${ticket.id}" type="button">Editar trayecto</button>
+      <button class="mini-btn" data-action="duplicate" data-id="${ticket.id}" type="button">Duplicar</button>
+      <button class="mini-btn danger" data-action="delete" data-id="${ticket.id}" type="button">Eliminar</button>
+    </div></article>`;
+}
+
 function openManualDialog() {
   $('manual-store').value = '';
   $('manual-total').value = '';
@@ -957,7 +1094,7 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla'],
     ...tickets.map((ticket) => [
       'GOS',
       ticket.info.fecha || '',
@@ -965,13 +1102,16 @@ function exportCsv() {
       ticket.info.categoria || '',
       ticket.info.total || 0,
       ticket.info.moneda || 'MXN',
-      ticket.info.tarjeta || '',
+      ticket.info.tipo === 'millas' ? 'MILLAS' : ticket.info.tarjeta || '',
       buildCodificacion(ticket.info),
       ticket.info.total_ticket || '',
       ticket.info.total_comprobante || '',
       ticket.info.propina || '',
       ticket.info.fuente_total || '',
-      ticket.info.notas || ''
+      ticket.info.notas || '',
+      ticket.info.kilometros || '',
+      ticket.info.millas || '',
+      ticket.info.tarifa_milla || ''
     ])
   ];
   downloadBlob(toCsv(rows), 'tickets.csv', 'text/csv;charset=utf-8');
@@ -985,8 +1125,9 @@ async function exportZip() {
   setStatus('Generando ZIP semanal...');
 
   try {
-    await exportWeeklyZip(tickets, getTicketImages);
-    setStatus('ZIP generado');
+    const { warnings } = await exportWeeklyZip(tickets, getTicketImages);
+    if (warnings.length) alert(warnings.join('\n'));
+    setStatus(warnings.length ? 'ZIP generado; faltan fotos de trayectos' : 'ZIP generado', Boolean(warnings.length));
   } catch (error) {
     showAlert(error.message || 'No se pudo generar el ZIP.', true);
     setStatus('No se pudo generar el ZIP', true);
