@@ -15,7 +15,7 @@ let mileageEditingId = null;
 let mileageBusy = false;
 let batchQueue = [];
 let batchRunning = false;
-let pairQueue = [];
+let currentPair = null;
 let pairRunning = false;
 const customPaymentEditors = new Set();
 const ticketView = {
@@ -38,8 +38,7 @@ function init() {
   $('ticket-input').addEventListener('change', loadTicketSelection);
   $('clear-ticket').addEventListener('click', clearTicketImage);
   $('scan-btn').addEventListener('click', processTicketSelection);
-  $('add-pair-btn').addEventListener('click', addPair);
-  $('pair-scan-btn').addEventListener('click', processPairQueue);
+  $('pair-scan-btn').addEventListener('click', processPair);
   $('manual-btn').addEventListener('click', openManualDialog);
   $('save-manual').addEventListener('click', saveManualTicket);
   $('export-csv').addEventListener('click', exportCsv);
@@ -67,7 +66,7 @@ function init() {
   $('manual-date').valueAsDate = new Date();
 
   renderAll();
-  addPair();
+  resetPair();
   ensureTicketsInMxn({ persist: true });
   loadFromCloud();
 }
@@ -307,144 +306,117 @@ function batchStatusLabel(item) {
   return { text: 'Pendiente', className: '' };
 }
 
-function addPair() {
-  pairQueue.push({
-    id: crypto.randomUUID ? crypto.randomUUID() : `pair-${Date.now()}-${Math.random()}`,
+function resetPair() {
+  currentPair = {
     ticketImage: null,
     voucherImage: null,
     ticketName: '',
     voucherName: '',
     status: 'pendiente',
     error: null
-  });
-  renderPairQueue();
+  };
+  renderPair();
 }
 
-async function loadPairImage(event, pairId, kind) {
+async function loadPairImage(event, kind) {
   const file = event.target.files?.[0];
-  if (!file) return;
-
-  const pair = pairQueue.find((item) => item.id === pairId);
-  if (!pair) return;
+  const pair = currentPair;
+  if (!file || pairRunning || pair.status === 'comprimiendo') return;
 
   try {
     pair.status = 'comprimiendo';
     pair.error = null;
-    renderPairQueue();
-    const dataUrl = await compressImage(file, 1800, 0.82);
-    if (kind === 'ticket') {
-      pair.ticketImage = dataUrl;
-      pair.ticketName = file.name || 'Ticket';
-    } else {
-      pair.voucherImage = dataUrl;
-      pair.voucherName = file.name || 'Comprobante';
-    }
+    pair[kind + 'Image'] = null;
+    pair[kind + 'Name'] = '';
+    renderPair();
+    pair[kind + 'Image'] = await compressImage(file, 1800, 0.82);
+    pair[kind + 'Name'] = file.name || (kind === 'ticket' ? 'Ticket' : 'Comprobante');
     pair.status = pairReady(pair) ? 'listo' : 'pendiente';
-    renderPairQueue();
   } catch (error) {
     pair.status = 'error';
     pair.error = error.message || 'No se pudo preparar la imagen.';
-    renderPairQueue();
+  } finally {
+    renderPair();
   }
 }
 
-async function processPairQueue() {
-  const readyPairs = pairQueue.filter((pair) => pairReady(pair) && pair.status !== 'guardado');
-  if (!readyPairs.length || pairRunning) return;
+async function processPair() {
+  const pair = currentPair;
+  if (!pairReady(pair) || pairRunning || pair.status === 'comprimiendo') return;
 
   pairRunning = true;
-  $('pair-scan-btn').disabled = true;
+  pair.status = 'analizando';
+  pair.error = null;
+  renderPair();
   $('scan-btn').disabled = true;
-  $('scan-result').innerHTML = '<div class="alert ok">Analizando pares ticket + comprobante...</div>';
+  $('scan-result').innerHTML = '<div class="alert ok">Analizando ticket y comprobante...</div>';
+  setStatus('Analizando par...');
 
-  let saved = 0;
-  let failed = 0;
-
-  for (const pair of readyPairs) {
-    pair.status = 'analizando';
-    pair.error = null;
-    renderPairQueue();
-    setStatus(`Analizando par ${saved + failed + 1} de ${readyPairs.length}...`);
-
-    try {
-      const response = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticketImage: pair.ticketImage, voucherImage: pair.voucherImage })
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) {
-        throw new Error(data?.error?.message || 'No se pudo escanear este par.');
-      }
-
-      const info = await convertInfoToMxn(data.ticket);
-      const ticket = buildTicket(info);
-      await storeTicketImages(ticket.id, { ticketImage: pair.ticketImage, voucherImage: pair.voucherImage });
-      tickets.unshift(ticket);
-      saveLocalTickets();
-      await saveToCloud({ upserts: [ticket] });
-      pair.status = 'guardado';
-      pair.ticketId = ticket.id;
-      saved += 1;
-    } catch (error) {
-      pair.status = 'error';
-      pair.error = error.message || 'Error';
-      failed += 1;
+  try {
+    const response = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticketImage: pair.ticketImage, voucherImage: pair.voucherImage })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data?.error?.message || 'No se pudo escanear este par.');
     }
 
-    renderPairQueue();
+    const info = await convertInfoToMxn(data.ticket);
+    const ticket = buildTicket(info);
+    await storeTicketImages(ticket.id, { ticketImage: pair.ticketImage, voucherImage: pair.voucherImage });
+    tickets.unshift(ticket);
+    try {
+      saveLocalTickets();
+    } catch (error) {
+      tickets = tickets.filter((item) => item.id !== ticket.id);
+      throw error;
+    }
+    await saveToCloud({ upserts: [ticket] });
+    resetPair();
     renderAll();
+    $('scan-result').innerHTML = '<div class="alert ok">Par guardado. Ya puedes cargar el siguiente ticket y comprobante.</div>';
+    setStatus('Par guardado. Listo para el siguiente.');
+  } catch (error) {
+    pair.status = 'error';
+    pair.error = error.message || 'No se pudo analizar el par.';
+    $('scan-result').innerHTML = '<div class="alert error">No se pudo guardar el par. Las fotos siguen seleccionadas para reintentar.</div>';
+    setStatus(pair.error, true);
+  } finally {
+    pairRunning = false;
+    updateTicketActionButton();
+    renderPair();
   }
-
-  pairRunning = false;
-  updateTicketActionButton();
-  renderPairQueue();
-  $('scan-result').innerHTML = `<div class="alert ${failed ? 'error' : 'ok'}">Pares terminados: ${saved} guardados, ${failed} con error.</div>`;
-  setStatus(`Pares terminados: ${saved} guardados, ${failed} con error`, Boolean(failed));
 }
 
-function removePair(pairId) {
-  pairQueue = pairQueue.filter((pair) => pair.id !== pairId);
-  if (!pairQueue.length) addPair();
-  else renderPairQueue();
-}
-
-function renderPairQueue() {
+function renderPair() {
+  const pair = currentPair;
   const list = $('pair-list');
-  list.innerHTML = pairQueue.map((pair, index) => {
-    const label = pairStatusLabel(pair);
-    return `
-      <div class="pair-item">
-        <div class="pair-head">
-          <strong>Par ${index + 1}</strong>
-          <button class="mini-btn danger" data-pair-remove="${pair.id}" type="button">Quitar</button>
-        </div>
-        <div class="pair-grid">
+  const label = pairStatusLabel(pair);
+  const busy = pairRunning || pair.status === 'comprimiendo';
+  list.innerHTML = `
+    <div class="pair-item">
+      <div class="pair-grid">
+        ${[['ticket', 'Ticket'], ['voucher', 'Comprobante']].map(([kind, title]) => `
           <label class="pair-picker">
-            <input data-pair-input="${pair.id}" data-kind="ticket" type="file" accept="image/*">
-            <span>Ticket</span>
-            <small>${escapeHtml(pair.ticketName || 'Seleccionar foto')}</small>
+            <input data-pair-input data-kind="${kind}" type="file" accept="image/*" ${busy ? 'disabled' : ''}>
+            <span>${title}</span>
+            <small>${escapeHtml(pair[kind + 'Name'] || 'Seleccionar foto')}</small>
+            ${pair[kind + 'Image'] ? `<img class="preview" src="${escapeHtml(pair[kind + 'Image'])}" alt="Vista previa: ${title}">` : ''}
           </label>
-          <label class="pair-picker">
-            <input data-pair-input="${pair.id}" data-kind="voucher" type="file" accept="image/*">
-            <span>Comprobante</span>
-            <small>${escapeHtml(pair.voucherName || 'Seleccionar foto')}</small>
-          </label>
-        </div>
-        <div class="pair-status ${label.className}" title="${escapeHtml(pair.error || label.text)}">${escapeHtml(label.text)}</div>
+        `).join('')}
       </div>
-    `;
-  }).join('');
-
+      <div class="pair-status ${label.className}" role="status">${escapeHtml(label.text)}</div>
+    </div>
+  `;
   list.querySelectorAll('input[data-pair-input]').forEach((input) => {
-    input.addEventListener('change', (event) => loadPairImage(event, input.dataset.pairInput, input.dataset.kind));
+    input.addEventListener('change', (event) => loadPairImage(event, input.dataset.kind));
   });
-  list.querySelectorAll('button[data-pair-remove]').forEach((button) => {
-    button.addEventListener('click', () => removePair(button.dataset.pairRemove));
-  });
-
-  $('pair-scan-btn').disabled = pairRunning || !pairQueue.some((pair) => pairReady(pair) && pair.status !== 'guardado');
+  $('pair-scan-btn').disabled = busy || !pairReady(pair);
+  $('pair-scan-btn').textContent = pairRunning ? 'Analizando par...' : 'Analizar par';
 }
+
 
 function pairReady(pair) {
   return Boolean(pair.ticketImage && pair.voucherImage);
@@ -453,7 +425,6 @@ function pairReady(pair) {
 function pairStatusLabel(pair) {
   if (pair.status === 'comprimiendo') return { text: 'Comprimiendo', className: 'running' };
   if (pair.status === 'analizando') return { text: 'Analizando', className: 'running' };
-  if (pair.status === 'guardado') return { text: 'Guardado', className: 'done' };
   if (pair.status === 'error') return { text: pair.error || 'Error', className: 'error' };
   if (!pair.ticketImage && !pair.voucherImage) return { text: 'Faltan ticket y comprobante', className: '' };
   if (!pair.ticketImage) return { text: 'Falta ticket', className: '' };
