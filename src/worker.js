@@ -1,4 +1,4 @@
-import { handleScan } from './routes/ai.js';
+import { handleScan, handleMileageScan } from './routes/ai.js';
 import { handleFx } from './routes/fx.js';
 import { handleKvLoad, handleKvSave } from './routes/kv.js';
 import { corsHeaders, json, withCors } from './services/http.js';
@@ -12,6 +12,9 @@ export default {
     }
 
     try {
+      if (url.pathname === '/api/scan-mileage' && request.method === 'POST') {
+        return withCors(await handleMileageScan(request, env));
+      }
       if (url.pathname === '/api/scan' && request.method === 'POST') {
         return withCors(await handleScan(request, env));
       }
