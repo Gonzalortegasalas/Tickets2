@@ -38,6 +38,7 @@ body {
 main { max-width: 900px; margin: 0 auto; padding: 14px; }
 .view { display: none; }
 .view.active { display: block; }
+#scan-result:not(:empty) { margin-bottom: 12px; }
 
 .capture-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .capture-grid.single { grid-template-columns: 1fr; }
