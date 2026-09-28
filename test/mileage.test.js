@@ -20,7 +20,8 @@ test('kilometers convert without rounding miles before the payment', () => {
 test('mileage records survive KV round trips with their typed metadata', async () => {
   const records = new Map();
   const kv = { get: async (key) => records.get(key), put: async (key, value) => records.set(key, value) };
-  const ticket = { id: 'route', info: buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Origen → destino', roundTrip: true }) };
+  const ticket = { id: 'route', info: buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Origen → destino', destinationAddress: '  Calle Prueba 123, Centro  ', roundTrip: true }) };
+  assert.equal(ticket.info.direccion_destino, 'Calle Prueba 123, Centro');
   await saveTicketsPatch(kv, { upserts: [ticket], deletes: [] });
   assert.deepEqual(await loadTickets(kv), [ticket]);
 });
@@ -41,7 +42,7 @@ test('route scanning uses its own schema and endpoint, preserving receipt scanni
     const body = JSON.parse(options.body);
     requests.push(body);
     const result = body.text.format.name === 'mileage_scan'
-      ? { kilometros: 16.09344, trayecto: 'A → B', fecha: null, notas: null }
+      ? { kilometros: 16.09344, trayecto: 'A → B', direccion_destino: '  Calle Prueba 123, Centro  ', fecha: null, notas: null }
       : { tienda: 'Tienda', total: 100, moneda: 'MXN' };
     return Response.json({ output: [{ content: [{ text: JSON.stringify(result) }] }] });
   });
@@ -49,15 +50,30 @@ test('route scanning uses its own schema and endpoint, preserving receipt scanni
   const post = (path, body) => new Request(`https://example.test${path}`, { method: 'POST', body: JSON.stringify(body) });
   const routeResponse = await worker.fetch(post('/api/scan-mileage', { routeImage: 'data:image/png;base64,test' }), env);
   assert.equal(routeResponse.status, 200);
-  assert.equal((await routeResponse.json()).route.kilometros, 16.09344);
+  const route = (await routeResponse.json()).route;
+  assert.equal(route.kilometros, 16.09344);
+  assert.equal(route.direccion_destino, 'Calle Prueba 123, Centro');
   assert.equal(requests[0].model, 'test-model');
   assert.equal(requests[0].store, false);
   assert.equal(requests[0].text.format.strict, true);
+  assert.ok(requests[0].text.format.schema.required.includes('direccion_destino'));
+  assert.deepEqual(requests[0].text.format.schema.properties.direccion_destino.type, ['string', 'null']);
   const receiptResponse = await worker.fetch(post('/api/scan', { ticketImage: 'data:image/png;base64,test' }), env);
   assert.equal((await receiptResponse.json()).ticket.total, 100);
   assert.equal(requests[1].text.format.name, 'ticket_scan');
   assert.equal((await worker.fetch(post('/api/scan-mileage', {}), env)).status, 400);
   assert.equal((await worker.fetch(post('/api/scan-mileage', {}), {})).status, 500);
+});
+
+test('missing or invalid destination addresses do not prevent reading distance or creating mileage', async (t) => {
+  for (const address of [undefined, null, '', '  ', 42, { street: 'No' }]) {
+    const mock = t.mock.method(globalThis, 'fetch', async () => Response.json({ output_text: JSON.stringify({ kilometros: 10, direccion_destino: address }) }));
+    const route = await scanMileageWithOpenAI({ apiKey: 'test', model: 'test', routeImage: 'test' });
+    assert.equal(route.kilometros, 10);
+    assert.equal(route.direccion_destino, null);
+    assert.equal(buildMileageInfo({ km: 10, date: '2026-09-28', destinationAddress: address }).direccion_destino, null);
+    mock.mock.restore();
+  }
 });
 
 test('ambiguous, invalid, refused and failed route responses are handled safely', async (t) => {

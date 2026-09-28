@@ -186,12 +186,15 @@ test('a stale script tag without its global is replaced', async (t) => {
 
 test('mileage exports image-only PDF and explicit Excel distance/payment formulas', async (t) => {
   const state = setup(t);
-  const route = ticket('route', buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Casa → oficina' }));
+  const route = ticket('route', buildMileageInfo({ km: 100, date: '2026-09-22', route: 'Casa → oficina', destinationAddress: 'Calle Prueba 123, Centro' }));
   await exportWeeklyZip([route, ticket('receipt')], async () => ({ ticketImage: 'data:image/png;base64,valid' }));
   assert.equal(state.rows[1][5], 'MILLAS');
   assert.equal(state.rows[1][4], 621.37);
   assert.equal(state.rows[1][15], 100);
   assert.equal(state.rows[1][17], 10);
+  assert.equal(state.rows[0][20], 'Direccion del destino');
+  assert.equal(state.rows[1][20], 'Calle Prueba 123, Centro');
+  assert.equal(state.rows[2][20], '');
   assert.equal(state.sheet.Q2.f, 'P2/1.609344');
   assert.equal(state.sheet.E2.f, 'ROUND(Q2*R2,2)');
   assert.equal(state.sheet.E2.v, 621.37);
@@ -223,6 +226,7 @@ test('round-trip Excel labels and formulas apply the factor once; legacy trips r
   assert.equal(state.sheet.Q2.f, 'P2/1.609344*T2');
   assert.equal(state.sheet.E2.v, 1242.74);
   assert.equal(state.rows[2][18], 'Solo ida');
+  assert.equal(state.rows[2][20], '');
   assert.equal(state.sheet.E3.v, 621.37);
   assert.equal(state.pdfs[0].texts.length, 0);
 });

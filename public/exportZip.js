@@ -199,7 +199,8 @@ function buildWorkbook(tickets) {
     'Millas (km / 1.609344 × factor)',
     'Tarifa MXN por milla',
     'Tipo de trayecto',
-    'Factor recorrido'
+    'Factor recorrido',
+    'Direccion del destino'
   ]];
 
   for (const ticket of tickets) {
@@ -224,7 +225,8 @@ function buildWorkbook(tickets) {
       info.tipo === 'millas' ? info.millas : '',
       info.tipo === 'millas' ? info.tarifa_milla : '',
       info.tipo === 'millas' ? (info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida') : '',
-      info.tipo === 'millas' ? (info.ida_vuelta === true ? 2 : 1) : ''
+      info.tipo === 'millas' ? (info.ida_vuelta === true ? 2 : 1) : '',
+      info.tipo === 'millas' ? info.direccion_destino || '' : ''
     ]);
   }
 
@@ -255,7 +257,8 @@ function buildWorkbook(tickets) {
     { wch: 32 },
     { wch: 22 },
     { wch: 18 },
-    { wch: 18 }
+    { wch: 18 },
+    { wch: 55 }
   ];
   window.XLSX.utils.book_append_sheet(wb, ws, 'Gastos');
   return wb;
