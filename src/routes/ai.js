@@ -1,5 +1,17 @@
 import { json } from '../services/http.js';
-import { scanReceiptWithOpenAI } from '../services/openai.js';
+import { scanReceiptWithOpenAI, scanMileageWithOpenAI } from '../services/openai.js';
+
+export async function handleMileageScan(request, env) {
+  if (!env.OPENAI_API_KEY) {
+    return json({ error: { code: 'missing_openai_key', message: 'No está configurada la lectura de imágenes. Ingresa los kilómetros manualmente.' } }, 500);
+  }
+  const body = await request.json().catch(() => null);
+  if (typeof body?.routeImage !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(body.routeImage)) {
+    return json({ error: { code: 'missing_route_image', message: 'Adjunta una captura del trayecto.' } }, 400);
+  }
+  const route = await scanMileageWithOpenAI({ apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL || 'gpt-5.4-mini', routeImage: body.routeImage });
+  return json({ ok: true, route });
+}
 
 export async function handleScan(request, env) {
   if (!env.OPENAI_API_KEY) {
