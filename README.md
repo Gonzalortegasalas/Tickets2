@@ -74,6 +74,17 @@ Usa un modelo mini para mantener costo bajo. Si necesitas más precisión en tic
 - El CSV y el Excel del ZIP incluyen la columna `Codificacion` con formato `GOS [cuenta] año.mes.día - horaHRS - comercio - MXN$ monto`.
 - El ZIP semanal crea una carpeta por codificación y dentro guarda un PDF con imagen del ticket, comprobante cuando existe y resumen.
 
+## Trayectos y millas
+
+- En Escanear, usa **Registrar millas** y adjunta una captura de Google Maps.
+- Puedes leer los kilómetros de la foto o ingresarlos manualmente. Revisa trayecto, fecha y distancia antes de guardar.
+- Se calcula `millas = km / 1.609344` y `pago MXN = redondear(millas × 10, 2)`, sin redondear primero la distancia.
+- Los trayectos se guardan junto con los tickets y tienen filtro **MILLAS** y edición propia.
+- Excel conserva sus columnas existentes y agrega kilómetros, millas y tarifa; la cuenta y la codificación usan **MILLAS**. Las celdas de millas e importe incluyen fórmulas y valores calculados.
+- El PDF de un trayecto contiene únicamente la captura. Si falta la foto, el ZIP conserva el registro en Excel y avisa en pantalla y en `avisos.txt`; no genera un PDF vacío.
+- Las fotos siguen siendo locales: exporta desde el mismo dispositivo y navegador donde las guardaste.
+- Validación: `npm test` y `npm run check`.
+
 ## Cambios principales frente a la versión anterior
 
 - OpenAI es el único proveedor.
