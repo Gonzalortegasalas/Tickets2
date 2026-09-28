@@ -15,6 +15,7 @@
 
   <main>
     <section id="view-scan" class="view active">
+      <div id="scan-result" aria-live="polite"></div>
       <article class="panel ticket-capture-panel">
         <div class="panel-head">
           <h2>Escanea uno o más tickets</h2>
@@ -44,9 +45,34 @@
         <button id="pair-scan-btn" class="primary-btn" type="button" disabled>Analizar par</button>
       </article>
 
-      <button id="mileage-btn" class="secondary-btn mileage-btn" type="button">Registrar millas</button>
+      <article id="mileage-panel" class="panel flow-panel ticket-capture-panel">
+        <form id="mileage-form">
+          <div class="panel-head">
+            <h2 id="mileage-title">Registrar millas</h2>
+            <button id="mileage-clear" class="icon-btn" type="button" title="Quitar selección de millas" hidden>×</button>
+          </div>
+          <div class="mileage-trip-options" role="group" aria-label="Tipo de trayecto">
+            <button id="mileage-one-way" class="secondary-btn" type="button" aria-pressed="true">Solo ida</button>
+            <button id="mileage-round-trip" class="secondary-btn" type="button" aria-pressed="false">Ida y vuelta</button>
+          </div>
+          <label class="dropzone mileage-dropzone">
+            <input id="mileage-image" type="file" accept="image/*" aria-label="Foto del trayecto">
+            <span class="drop-icon">⌁</span>
+            <span>Elegir foto</span>
+            <small>Captura de Google Maps con los kilómetros de ida</small>
+          </label>
+          <img id="mileage-preview" class="preview" alt="Captura del trayecto" hidden>
+          <input id="mileage-route" type="hidden">
+          <input id="mileage-date" type="hidden">
+          <input id="mileage-km" type="hidden">
+          <button id="mileage-analyze" class="primary-btn mileage-btn" type="button" disabled>Analizar trayecto</button>
+          <button id="mileage-save" class="secondary-btn" type="submit" hidden>Guardar cambios</button>
+          <p class="mileage-hint">Se registra automáticamente al subir la foto. Ida y vuelta duplica las millas y el pago.</p>
+          <p id="mileage-calculation" class="mileage-hint" aria-live="polite" hidden></p>
+          <p id="mileage-message" class="mileage-hint" role="status"></p>
+        </form>
+      </article>
       <button id="manual-btn" class="secondary-btn" type="button">Registrar manualmente</button>
-      <div id="scan-result"></div>
     </section>
 
     <section id="view-tickets" class="view">
@@ -125,30 +151,6 @@
       <menu>
         <button value="cancel" class="secondary-btn" type="submit">Cancelar</button>
         <button id="save-manual" value="default" class="primary-btn" type="button">Guardar</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="mileage-dialog">
-    <form id="mileage-form" class="manual-form">
-      <h2>Registrar millas</h2>
-      <p>Elige el tipo de trayecto y sube una captura de Google Maps. Se leerá y registrará automáticamente. Si la captura no muestra fecha, se usará la de hoy.</p>
-      <div class="mileage-trip-options" role="group" aria-label="Tipo de trayecto">
-        <button id="mileage-one-way" class="secondary-btn" type="button" aria-pressed="true">Solo ida</button>
-        <button id="mileage-round-trip" class="secondary-btn" type="button" aria-pressed="false">Ida y vuelta</button>
-      </div>
-      <p>Usa una captura con la distancia de ida. Ida y vuelta duplica las millas y el pago.</p>
-      <label>Foto del trayecto<input id="mileage-image" type="file" accept="image/*"></label>
-      <img id="mileage-preview" class="preview" alt="Captura del trayecto" hidden>
-      <button id="mileage-analyze" class="secondary-btn" type="button" disabled>Reintentar lectura</button>
-      <label>Trayecto<input id="mileage-route" type="text" placeholder="Origen → destino"></label>
-      <label>Fecha del trayecto<input id="mileage-date" type="date" required></label>
-      <label>Kilómetros de ida<input id="mileage-km" type="text" inputmode="decimal" required></label>
-      <p id="mileage-calculation" aria-live="polite">1 milla = 1.609344 km · $10 MXN por milla</p>
-      <p id="mileage-message" role="status"></p>
-      <menu>
-        <button id="mileage-cancel" class="secondary-btn" type="button">Cancelar</button>
-        <button id="mileage-save" class="primary-btn" type="submit">Guardar trayecto</button>
       </menu>
     </form>
   </dialog>

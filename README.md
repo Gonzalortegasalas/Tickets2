@@ -76,8 +76,8 @@ Usa un modelo mini para mantener costo bajo. Si necesitas más precisión en tic
 
 ## Trayectos y millas
 
-- En Escanear, usa **Registrar millas**, elige **Solo ida** o **Ida y vuelta** y adjunta una captura de Google Maps con la distancia de ida. Se lee y guarda automáticamente; si no hay fecha en la captura se usa la fecha local de hoy.
-- Si la foto no se puede leer, se conserva para reintentar o completar los kilómetros manualmente. Los registros guardados se pueden editar; al editar se confirma con **Guardar trayecto**.
+- En Escanear, la tarjeta **Registrar millas** permite elegir **Solo ida** o **Ida y vuelta** y subir la captura de Google Maps desde **Elegir foto**, igual que los tickets. No solicita trayecto, fecha ni kilómetros manualmente: se lee y guarda automáticamente; si no hay fecha en la captura se usa la fecha local de hoy. Al guardar, limpia la selección para subir otra captura.
+- Si la foto no se puede leer, se conserva para reintentar o reemplazarla por una captura más clara. **Editar trayecto** permite cambiar solo ida/ida y vuelta con **Guardar cambios**, o sustituir la foto para volver a analizarla.
 - Se calcula `millas = km / 1.609344 × factor` y `pago MXN = redondear(millas × 10, 2)`, sin redondear primero la distancia. El factor es 1 para solo ida y 2 para ida y vuelta; los kilómetros de la captura se conservan sin duplicar. Los registros anteriores siguen siendo de solo ida.
 - Los trayectos se guardan junto con los tickets y tienen filtro **MILLAS** y edición propia.
 - Excel conserva sus columnas existentes y agrega el tipo de trayecto y factor del recorrido a kilómetros, millas y tarifa; la cuenta y la codificación usan **MILLAS**. Las celdas de millas e importe incluyen fórmulas y valores calculados. El CSV también indica el tipo y factor.

@@ -29,15 +29,12 @@ const $ = (id) => document.getElementById(id);
 init();
 
 function init() {
-  $('mileage-btn').addEventListener('click', () => openMileageDialog());
+  $('mileage-clear').addEventListener('click', () => { if (!mileageBusy) resetMileageCapture(); });
   $('mileage-image').addEventListener('change', loadMileageImage);
   $('mileage-analyze').addEventListener('click', analyzeMileageImage);
-  $('mileage-km').addEventListener('input', updateMileageCalculation);
   $('mileage-one-way').addEventListener('click', () => selectMileageTrip(false));
   $('mileage-round-trip').addEventListener('click', () => selectMileageTrip(true));
   $('mileage-form').addEventListener('submit', saveMileage);
-  $('mileage-cancel').addEventListener('click', () => { if (!mileageBusy) $('mileage-dialog').close(); });
-  $('mileage-dialog').addEventListener('cancel', (event) => { if (mileageBusy) event.preventDefault(); });
   $('ticket-input').addEventListener('change', loadTicketSelection);
   $('clear-ticket').addEventListener('click', clearTicketImage);
   $('scan-btn').addEventListener('click', processTicketSelection);
@@ -70,6 +67,7 @@ function init() {
 
   renderAll();
   resetPair();
+  resetMileageCapture();
   ensureTicketsInMxn({ persist: true });
   loadFromCloud();
 }
@@ -564,7 +562,7 @@ function renderTickets() {
       if (button.dataset.action === 'duplicate') duplicateTicket(button.dataset.id);
       if (button.dataset.action === 'payment-save') saveCustomPayment(button.dataset.id);
       if (button.dataset.action === 'currency-apply') applyTicketAmountCurrency(button.dataset.id);
-      if (button.dataset.action === 'mileage-edit') openMileageDialog(button.dataset.id);
+      if (button.dataset.action === 'mileage-edit') editMileage(button.dataset.id);
     });
   });
 
@@ -888,46 +886,63 @@ async function duplicateTicket(id) {
   renderAll();
 }
 
-async function openMileageDialog(id = null) {
-  if (mileageBusy) return;
-  mileageEditingId = id;
+function resetMileageCapture() {
+  mileageEditingId = null;
   mileageImage = null;
+  mileageRoundTrip = false;
   $('mileage-form').reset();
+  $('mileage-route').value = '';
+  $('mileage-km').value = '';
+  $('mileage-image').value = '';
+  $('mileage-title').textContent = 'Registrar millas';
+  $('mileage-clear').hidden = true;
+  $('mileage-save').hidden = true;
   $('mileage-preview').hidden = true;
   $('mileage-preview').removeAttribute('src');
   $('mileage-analyze').disabled = true;
+  $('mileage-analyze').textContent = 'Analizar trayecto';
   $('mileage-message').textContent = '';
-  const ticket = tickets.find((item) => item.id === id);
   const today = new Date();
   $('mileage-date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  selectMileageTrip(ticket?.info.ida_vuelta === true);
-  if (ticket) {
-    $('mileage-route').value = ticket.info.tienda || '';
-    $('mileage-date').value = dateForFx(ticket.info.fecha);
-    $('mileage-km').value = ticket.info.kilometros;
-  }
+  $('mileage-one-way').setAttribute('aria-pressed', 'true');
+  $('mileage-round-trip').setAttribute('aria-pressed', 'false');
   updateMileageCalculation();
-  $('mileage-dialog').showModal();
-  if (ticket) {
-    setMileageBusy(true);
-    try {
-      const images = await getTicketImages(id);
-      mileageImage = images?.ticketImage || null;
-      if (mileageImage) {
-        $('mileage-preview').src = mileageImage;
-        $('mileage-preview').hidden = false;
-      } else {
-        $('mileage-message').textContent = 'La foto no está en este dispositivo. Adjunta la captura para guardar.';
-      }
-    } catch {
-      $('mileage-message').textContent = 'No se pudo leer la foto local. Puedes adjuntarla de nuevo.';
-    } finally { setMileageBusy(false); }
-  }
+}
+
+async function editMileage(id) {
+  if (mileageBusy) return;
+  const ticket = tickets.find((item) => item.id === id);
+  if (!ticket) return;
+  resetMileageCapture();
+  mileageEditingId = id;
+  $('mileage-title').textContent = 'Editar millas';
+  $('mileage-clear').hidden = false;
+  $('mileage-save').hidden = false;
+  $('mileage-route').value = ticket.info.tienda || '';
+  $('mileage-date').value = dateForFx(ticket.info.fecha);
+  $('mileage-km').value = ticket.info.kilometros;
+  selectMileageTrip(ticket.info.ida_vuelta === true);
+  switchView('scan');
+  $('mileage-panel').scrollIntoView({ block: 'start' });
+  setMileageBusy(true);
+  try {
+    const images = await getTicketImages(id);
+    mileageImage = images?.ticketImage || null;
+    if (mileageImage) {
+      $('mileage-preview').src = mileageImage;
+      $('mileage-preview').hidden = false;
+    } else {
+      $('mileage-message').textContent = 'La foto no está en este dispositivo. Adjunta la captura para guardar.';
+    }
+  } catch {
+    $('mileage-message').textContent = 'No se pudo leer la foto local. Puedes adjuntarla de nuevo.';
+  } finally { setMileageBusy(false); }
 }
 
 function setMileageBusy(busy) {
   mileageBusy = busy;
-  ['mileage-image', 'mileage-route', 'mileage-date', 'mileage-km', 'mileage-save', 'mileage-cancel', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
+  ['mileage-image', 'mileage-clear', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
+  $('mileage-save').disabled = busy || !mileageImage || !Number($('mileage-km').value);
   $('mileage-analyze').disabled = busy || !mileageImage;
 }
 
@@ -935,12 +950,18 @@ async function loadMileageImage(event) {
   if (mileageBusy) return;
   const file = event.target.files?.[0];
   if (!file) return;
+  if (!mileageEditingId) {
+    const roundTrip = mileageRoundTrip;
+    resetMileageCapture();
+    selectMileageTrip(roundTrip);
+  }
   setMileageBusy(true);
   mileageImage = null;
   $('mileage-km').value = '';
   $('mileage-route').value = '';
   updateMileageCalculation();
   $('mileage-preview').hidden = true;
+  $('mileage-clear').hidden = false;
   $('mileage-message').textContent = 'Preparando captura...';
   try {
     mileageImage = await compressImage(file, 1800, 0.9);
@@ -969,11 +990,11 @@ async function analyzeMileageImage() {
     }
     if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
     if (/^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
-    $('mileage-message').textContent = [data.route.notas, 'Revisa los kilómetros y la fecha antes de guardar.'].filter(Boolean).join(' ');
     updateMileageCalculation();
-    if (!mileageEditingId) await persistMileage();
+    await persistMileage();
   } catch (error) {
-    $('mileage-message').textContent = `${error.message} Puedes ingresar los kilómetros manualmente.`;
+    $('mileage-message').textContent = `${error.message} Reintenta o sube una captura donde se vea claramente la distancia.`;
+    $('mileage-analyze').textContent = 'Reintentar análisis';
   } finally { setMileageBusy(false); }
 }
 
@@ -988,9 +1009,11 @@ function selectMileageTrip(roundTrip) {
 function updateMileageCalculation() {
   try {
     const values = calculateMileage(parseMoneyInput($('mileage-km').value), mileageRoundTrip);
+    $('mileage-calculation').hidden = false;
     $('mileage-calculation').textContent = `${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'}: ${values.km} km ÷ 1.609344${mileageRoundTrip ? ' × 2' : ''} = ${values.miles.toFixed(4)} millas × $10 = MXN$ ${values.total.toFixed(2)}`;
   } catch {
-    $('mileage-calculation').textContent = '1 milla = 1.609344 km · $10 MXN por milla';
+    $('mileage-calculation').hidden = true;
+    $('mileage-calculation').textContent = '';
   }
 }
 
@@ -1018,8 +1041,10 @@ async function persistMileage() {
   mileageEditingId = ticket.id;
   await saveToCloud({ upserts: [ticket] });
   renderAll();
-  $('mileage-dialog').close();
-  setStatus(`Trayecto guardado como MILLAS · ${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'} · ${formatCurrency(info.total)}`);
+  const message = `Trayecto guardado como MILLAS · ${mileageRoundTrip ? 'Ida y vuelta' : 'Solo ida'} · ${formatCurrency(info.total)}`;
+  resetMileageCapture();
+  $('mileage-message').textContent = `${message}. Ya puedes subir otra captura.`;
+  setStatus(message);
 }
 
 function renderMileageCard(ticket) {
