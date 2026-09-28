@@ -72,7 +72,7 @@ Usa un modelo mini para mantener costo bajo. Si necesitas más precisión en tic
 - Analizar varios tickets con comprobantes: agrega pares de ticket + comprobante; el total final toma el monto más alto confiable, normalmente el comprobante cuando incluye propina.
 - Todos los montos se guardan y exportan en MXN. Si OpenAI detecta otra moneda, la app convierte con el tipo de cambio histórico por fecha.
 - El CSV y el Excel del ZIP incluyen la columna `Codificacion` con formato `GOS [cuenta] año.mes.día - horaHRS - comercio - MXN$ monto`.
-- El ZIP semanal crea una carpeta por codificación y dentro guarda un PDF con imagen del ticket, comprobante cuando existe y resumen.
+- El ZIP semanal crea una carpeta por codificación y dentro guarda un PDF con únicamente las imágenes del ticket y del comprobante cuando existe, una imagen por página. Los datos y cálculos se conservan en Excel. Si falta una imagen legible, se avisa fuera del PDF; no se generan PDFs vacíos.
 
 ## Trayectos y millas
 
