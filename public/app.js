@@ -895,6 +895,7 @@ function resetMileageCapture() {
   mileageDateManual = false;
   $('mileage-form').reset();
   $('mileage-route').value = '';
+  $('mileage-destination').value = '';
   $('mileage-km').value = '';
   $('mileage-image').value = '';
   $('mileage-title').textContent = 'Registrar millas';
@@ -922,6 +923,7 @@ async function editMileage(id) {
   $('mileage-clear').hidden = false;
   $('mileage-save').hidden = false;
   $('mileage-route').value = ticket.info.tienda || '';
+  $('mileage-destination').value = ticket.info.direccion_destino || '';
   $('mileage-date').value = dateForFx(ticket.info.fecha);
   mileageDateManual = true;
   $('mileage-km').value = ticket.info.kilometros;
@@ -967,6 +969,7 @@ async function loadMileageImage(event) {
   mileageImage = null;
   $('mileage-km').value = '';
   $('mileage-route').value = '';
+  $('mileage-destination').value = '';
   updateMileageCalculation();
   $('mileage-preview').hidden = true;
   $('mileage-clear').hidden = false;
@@ -996,7 +999,8 @@ async function analyzeMileageImage() {
     if (typeof data.route.kilometros !== 'number' || !Number.isFinite(data.route.kilometros) || data.route.kilometros <= 0) {
       throw new Error('No se pudo identificar una distancia clara.');
     }
-    if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
+    $('mileage-route').value = data.route.trayecto || '';
+    $('mileage-destination').value = data.route.direccion_destino || '';
     if (!mileageDateManual && /^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
     updateMileageCalculation();
     await persistMileage();
@@ -1039,7 +1043,7 @@ async function saveMileage(event) {
 async function persistMileage() {
   const previous = tickets.find((item) => item.id === mileageEditingId);
   if (!mileageImage && !previous) throw new Error('Adjunta la foto del trayecto.');
-  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, roundTrip: mileageRoundTrip });
+  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, destinationAddress: $('mileage-destination').value, roundTrip: mileageRoundTrip });
   const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
   if (mileageImage) await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
   const previousTickets = tickets.slice();
@@ -1060,6 +1064,7 @@ function renderMileageCard(ticket) {
   return `<article class="ticket-card">
     <div class="ticket-row"><div><h3 class="ticket-title">${escapeHtml(info.tienda)}</h3>
       <p class="ticket-meta">MILLAS · ${escapeHtml(info.fecha)}</p>
+      ${info.direccion_destino ? `<p class="ticket-meta">Dirección del destino: ${escapeHtml(info.direccion_destino)}</p>` : ''}
       <p class="ticket-meta">${info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida'} · ${numberOrZero(info.kilometros)} km${info.ida_vuelta === true ? ' × 2' : ''} → ${numberOrZero(info.millas).toFixed(4)} millas · $10 MXN/milla</p>
     </div><div class="ticket-total">${formatCurrency(info.total)}</div></div>
     <div class="ticket-actions">
@@ -1126,7 +1131,7 @@ function switchView(view) {
 function exportCsv() {
   if (!tickets.length) return;
   const rows = [
-    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla', 'Tipo de trayecto', 'Factor recorrido'],
+    ['Colaborador', 'Fecha', 'Tienda', 'Categoria', 'Total MXN', 'Moneda', 'Tarjeta', 'Codificacion', 'Total ticket', 'Total comprobante', 'Propina', 'Fuente total', 'Notas', 'Kilometros', 'Millas', 'Tarifa MXN por milla', 'Tipo de trayecto', 'Factor recorrido', 'Direccion del destino'],
     ...tickets.map((ticket) => [
       'GOS',
       ticket.info.fecha || '',
@@ -1145,7 +1150,8 @@ function exportCsv() {
       ticket.info.millas || '',
       ticket.info.tarifa_milla || '',
       ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 'Ida y vuelta' : 'Solo ida') : '',
-      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 2 : 1) : ''
+      ticket.info.tipo === 'millas' ? (ticket.info.ida_vuelta === true ? 2 : 1) : '',
+      ticket.info.tipo === 'millas' ? ticket.info.direccion_destino || '' : ''
     ])
   ];
   downloadBlob(toCsv(rows), 'tickets.csv', 'text/csv;charset=utf-8');

@@ -9,7 +9,7 @@ export function calculateMileage(kilometers, roundTrip = false) {
   return { km, miles, rate: MXN_PER_MILE, total: Math.round(miles * MXN_PER_MILE * 100) / 100 };
 }
 
-export function buildMileageInfo({ km, date, route, roundTrip = false }) {
+export function buildMileageInfo({ km, date, route, destinationAddress, roundTrip = false }) {
   const values = calculateMileage(km, roundTrip);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('Indica la fecha del trayecto.');
   const [year, month, day] = date.split('-').map(Number);
@@ -23,6 +23,7 @@ export function buildMileageInfo({ km, date, route, roundTrip = false }) {
     categoria: 'Millas', moneda: 'MXN', tarjeta: null, items: [],
     kilometros: values.km, millas: values.miles, tarifa_milla: values.rate, total: values.total,
     ida_vuelta: Boolean(roundTrip),
+    direccion_destino: typeof destinationAddress === 'string' ? destinationAddress.trim() || null : null,
     notas: 'Trayecto registrado con captura de Google Maps'
   };
 }
