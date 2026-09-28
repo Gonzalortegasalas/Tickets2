@@ -14,6 +14,7 @@ let mileageImage = null;
 let mileageEditingId = null;
 let mileageBusy = false;
 let mileageRoundTrip = false;
+let mileageDateManual = false;
 let batchQueue = [];
 let batchRunning = false;
 let currentPair = null;
@@ -31,6 +32,7 @@ init();
 function init() {
   $('mileage-clear').addEventListener('click', () => { if (!mileageBusy) resetMileageCapture(); });
   $('mileage-image').addEventListener('change', loadMileageImage);
+  $('mileage-date').addEventListener('input', () => { mileageDateManual = true; });
   $('mileage-analyze').addEventListener('click', analyzeMileageImage);
   $('mileage-one-way').addEventListener('click', () => selectMileageTrip(false));
   $('mileage-round-trip').addEventListener('click', () => selectMileageTrip(true));
@@ -890,6 +892,7 @@ function resetMileageCapture() {
   mileageEditingId = null;
   mileageImage = null;
   mileageRoundTrip = false;
+  mileageDateManual = false;
   $('mileage-form').reset();
   $('mileage-route').value = '';
   $('mileage-km').value = '';
@@ -920,6 +923,7 @@ async function editMileage(id) {
   $('mileage-save').hidden = false;
   $('mileage-route').value = ticket.info.tienda || '';
   $('mileage-date').value = dateForFx(ticket.info.fecha);
+  mileageDateManual = true;
   $('mileage-km').value = ticket.info.kilometros;
   selectMileageTrip(ticket.info.ida_vuelta === true);
   switchView('scan');
@@ -932,17 +936,17 @@ async function editMileage(id) {
       $('mileage-preview').src = mileageImage;
       $('mileage-preview').hidden = false;
     } else {
-      $('mileage-message').textContent = 'La foto no está en este dispositivo. Adjunta la captura para guardar.';
+      $('mileage-message').textContent = 'La foto no está en este dispositivo. Puedes cambiar la fecha o el tipo de recorrido; para exportar el PDF, usa el dispositivo con la foto o adjúntala de nuevo.';
     }
   } catch {
-    $('mileage-message').textContent = 'No se pudo leer la foto local. Puedes adjuntarla de nuevo.';
+    $('mileage-message').textContent = 'No se pudo leer la foto local. Puedes cambiar la fecha o el tipo de recorrido, o adjuntar la captura de nuevo.';
   } finally { setMileageBusy(false); }
 }
 
 function setMileageBusy(busy) {
   mileageBusy = busy;
-  ['mileage-image', 'mileage-clear', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
-  $('mileage-save').disabled = busy || !mileageImage || !Number($('mileage-km').value);
+  ['mileage-image', 'mileage-date', 'mileage-clear', 'mileage-one-way', 'mileage-round-trip'].forEach((id) => { $(id).disabled = busy; });
+  $('mileage-save').disabled = busy || (!mileageImage && !mileageEditingId) || !Number($('mileage-km').value);
   $('mileage-analyze').disabled = busy || !mileageImage;
 }
 
@@ -952,8 +956,12 @@ async function loadMileageImage(event) {
   if (!file) return;
   if (!mileageEditingId) {
     const roundTrip = mileageRoundTrip;
+    const date = $('mileage-date').value;
+    const dateManual = mileageDateManual;
     resetMileageCapture();
     selectMileageTrip(roundTrip);
+    $('mileage-date').value = date;
+    mileageDateManual = dateManual;
   }
   setMileageBusy(true);
   mileageImage = null;
@@ -989,7 +997,7 @@ async function analyzeMileageImage() {
       throw new Error('No se pudo identificar una distancia clara.');
     }
     if (data.route.trayecto) $('mileage-route').value = data.route.trayecto;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
+    if (!mileageDateManual && /^\d{4}-\d{2}-\d{2}$/.test(data.route.fecha || '')) $('mileage-date').value = data.route.fecha;
     updateMileageCalculation();
     await persistMileage();
   } catch (error) {
@@ -1029,11 +1037,11 @@ async function saveMileage(event) {
 }
 
 async function persistMileage() {
-  if (!mileageImage) throw new Error('Adjunta la foto del trayecto.');
-  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, roundTrip: mileageRoundTrip });
   const previous = tickets.find((item) => item.id === mileageEditingId);
+  if (!mileageImage && !previous) throw new Error('Adjunta la foto del trayecto.');
+  const info = buildMileageInfo({ km: parseMoneyInput($('mileage-km').value), date: $('mileage-date').value, route: $('mileage-route').value, roundTrip: mileageRoundTrip });
   const ticket = previous ? { ...previous, info, updatedAt: new Date().toISOString() } : buildTicket(info);
-  await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
+  if (mileageImage) await storeTicketImages(ticket.id, { ticketImage: mileageImage, voucherImage: null });
   const previousTickets = tickets.slice();
   if (previous) tickets = tickets.map((item) => item.id === ticket.id ? ticket : item);
   else tickets.unshift(ticket);

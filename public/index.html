@@ -55,6 +55,10 @@
             <button id="mileage-one-way" class="secondary-btn" type="button" aria-pressed="true">Solo ida</button>
             <button id="mileage-round-trip" class="secondary-btn" type="button" aria-pressed="false">Ida y vuelta</button>
           </div>
+          <label class="mileage-date-field">Fecha del trayecto
+            <input id="mileage-date" type="date" required>
+            <small>La fecha que elijas tiene prioridad sobre la captura.</small>
+          </label>
           <label class="dropzone mileage-dropzone">
             <input id="mileage-image" type="file" accept="image/*" aria-label="Foto del trayecto">
             <span class="drop-icon">⌁</span>
@@ -63,7 +67,6 @@
           </label>
           <img id="mileage-preview" class="preview" alt="Captura del trayecto" hidden>
           <input id="mileage-route" type="hidden">
-          <input id="mileage-date" type="hidden">
           <input id="mileage-km" type="hidden">
           <button id="mileage-analyze" class="primary-btn mileage-btn" type="button" disabled>Analizar trayecto</button>
           <button id="mileage-save" class="secondary-btn" type="submit" hidden>Guardar cambios</button>

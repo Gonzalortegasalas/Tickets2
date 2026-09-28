@@ -212,6 +212,9 @@ button {
 .mileage-trip-options button { flex: 1; margin-top: 0; }
 .mileage-trip-options [aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: white; }
 .mileage-dropzone { margin-top: 10px; }
+.mileage-date-field { display: grid; gap: 5px; margin-top: 10px; font-size: 13px; font-weight: 650; }
+.mileage-date-field input { width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: white; color: var(--text); font: inherit; }
+.mileage-date-field small { color: var(--muted); font-weight: 400; }
 .mileage-dropzone .drop-icon { color: var(--ok); }
 .mileage-hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
 .mileage-hint:empty { display: none; }
